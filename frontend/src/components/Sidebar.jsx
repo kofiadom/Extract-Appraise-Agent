@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Settings, RotateCcw, BookOpen, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Settings, RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 
-export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase }) {
+export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen, onToggle }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(apiUrl);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -34,114 +34,163 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase }) {
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen flex flex-col"
-      style={{ width: 260, background: '#1B2A4A', zIndex: 40 }}
+      className="fixed left-0 top-0 h-screen flex flex-col overflow-hidden transition-all duration-200"
+      style={{ width: isOpen ? 260 : 48, background: '#1B2A4A', zIndex: 40 }}
     >
-      {/* Logo / Brand */}
-      <div className="px-6 pt-7 pb-6 border-b border-white/10">
-        <div className="flex items-center gap-3 mb-1">
-          <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-            <BookOpen size={16} className="text-white" />
-          </div>
-          <div>
-            <p className="text-white font-semibold text-sm leading-tight">REST Evidence</p>
-            <p className="text-white/50 text-xs leading-tight">Extractor</p>
-          </div>
-        </div>
-        <p className="text-white/40 text-xs mt-3 leading-relaxed">
-          AI-powered systematic review tool for evidence extraction and quality appraisal.
-        </p>
-      </div>
-
-      {/* API URL config */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <div className="flex items-center gap-2 mb-2">
-          <Settings size={12} className="text-white/40" />
-          <p className="text-white/50 text-xs font-medium uppercase tracking-wider">API Endpoint</p>
-        </div>
-        {editing ? (
-          <div className="space-y-2">
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              autoFocus
-              className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-xs border border-white/20 focus:outline-none focus:border-white/40 placeholder-white/30"
-              placeholder="http://localhost:7777"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={handleSave}
-                className="flex-1 py-1.5 rounded-md bg-white/20 text-white text-xs font-medium hover:bg-white/30 transition-colors"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => { setDraft(apiUrl); setEditing(false); }}
-                className="flex-1 py-1.5 rounded-md bg-transparent text-white/50 text-xs font-medium hover:bg-white/10 transition-colors"
-              >
-                Cancel
-              </button>
+      {/* Toggle button — always visible */}
+      <div
+        className="flex items-center flex-shrink-0 border-b border-white/10"
+        style={{ height: 56, minHeight: 56 }}
+      >
+        {isOpen && (
+          <div className="flex items-center gap-3 px-5 flex-1 min-w-0">
+            <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
+              <BookOpen size={14} className="text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-white font-semibold text-sm leading-tight truncate">REST Evidence</p>
+              <p className="text-white/50 text-xs leading-tight">Extractor</p>
             </div>
           </div>
-        ) : (
-          <button
-            onClick={() => { setDraft(apiUrl); setEditing(true); }}
-            className="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors group"
-          >
-            <p className="text-white/70 text-xs font-mono truncate group-hover:text-white transition-colors">
-              {apiUrl}
-            </p>
-            <p className="text-white/30 text-xs mt-0.5 group-hover:text-white/50 transition-colors">
-              Click to edit
-            </p>
-          </button>
         )}
-      </div>
-
-      {/* Status */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <div className="flex items-center gap-2 mb-3">
-          <p className="text-white/50 text-xs font-medium uppercase tracking-wider">Status</p>
-        </div>
-        <StatusIndicator phase={phase} />
-      </div>
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Reset */}
-      <div className="px-5 py-5 border-t border-white/10">
         <button
-          onClick={handleResetClick}
-          disabled={!canReset}
-          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-            showResetConfirm
-              ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-              : canReset
-              ? 'bg-white/5 text-white/60 hover:bg-red-500/10 hover:text-red-300 border border-transparent'
-              : 'bg-white/5 text-white/20 border border-transparent cursor-not-allowed'
-          }`}
+          onClick={onToggle}
+          className="flex-shrink-0 w-12 h-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+          title={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
         >
-          {showResetConfirm ? (
-            <AlertTriangle size={14} className="flex-shrink-0" />
-          ) : (
-            <RotateCcw size={14} className="flex-shrink-0" />
-          )}
-          {showResetConfirm ? 'Click again to confirm' : 'Reset & Clear Results'}
+          {isOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
         </button>
-        <p className="text-white/25 text-xs mt-2 text-center">
-          Clears all data on backend and frontend
-        </p>
       </div>
 
-      {/* Footer */}
-      <div className="px-5 pb-5">
-        <p className="text-white/20 text-xs text-center">REST Evidence Extractor v1.0</p>
-      </div>
+      {/* Collapsed: icon strip */}
+      {!isOpen && (
+        <div className="flex flex-col items-center gap-4 pt-5">
+          <div
+            title={`Status: ${phase}`}
+            className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center"
+          >
+            <StatusDot phase={phase} />
+          </div>
+          {canReset && (
+            <button
+              onClick={handleResetClick}
+              title="Reset"
+              className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+            >
+              <RotateCcw size={13} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Expanded: full content */}
+      {isOpen && (
+        <>
+          <p className="text-white/40 text-xs px-5 pt-3 pb-4 border-b border-white/10 leading-relaxed">
+            AI-powered systematic review tool for evidence extraction and quality appraisal.
+          </p>
+
+          {/* API URL config */}
+          <div className="px-5 py-5 border-b border-white/10">
+            <div className="flex items-center gap-2 mb-2">
+              <Settings size={12} className="text-white/40" />
+              <p className="text-white/50 text-xs font-medium uppercase tracking-wider">API Endpoint</p>
+            </div>
+            {editing ? (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  autoFocus
+                  className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-xs border border-white/20 focus:outline-none focus:border-white/40 placeholder-white/30"
+                  placeholder="http://localhost:7777"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSave}
+                    className="flex-1 py-1.5 rounded-md bg-white/20 text-white text-xs font-medium hover:bg-white/30 transition-colors"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setDraft(apiUrl); setEditing(false); }}
+                    className="flex-1 py-1.5 rounded-md bg-transparent text-white/50 text-xs font-medium hover:bg-white/10 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setDraft(apiUrl); setEditing(true); }}
+                className="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors group"
+              >
+                <p className="text-white/70 text-xs font-mono truncate group-hover:text-white transition-colors">
+                  {apiUrl}
+                </p>
+                <p className="text-white/30 text-xs mt-0.5 group-hover:text-white/50 transition-colors">
+                  Click to edit
+                </p>
+              </button>
+            )}
+          </div>
+
+          {/* Status */}
+          <div className="px-5 py-5 border-b border-white/10">
+            <p className="text-white/50 text-xs font-medium uppercase tracking-wider mb-3">Status</p>
+            <StatusIndicator phase={phase} />
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Reset */}
+          <div className="px-5 py-5 border-t border-white/10">
+            <button
+              onClick={handleResetClick}
+              disabled={!canReset}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                showResetConfirm
+                  ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                  : canReset
+                  ? 'bg-white/5 text-white/60 hover:bg-red-500/10 hover:text-red-300 border border-transparent'
+                  : 'bg-white/5 text-white/20 border border-transparent cursor-not-allowed'
+              }`}
+            >
+              {showResetConfirm ? (
+                <AlertTriangle size={14} className="flex-shrink-0" />
+              ) : (
+                <RotateCcw size={14} className="flex-shrink-0" />
+              )}
+              {showResetConfirm ? 'Click again to confirm' : 'Reset & Clear Results'}
+            </button>
+            <p className="text-white/25 text-xs mt-2 text-center">
+              Clears all data on backend and frontend
+            </p>
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 pb-5">
+            <p className="text-white/20 text-xs text-center">REST Evidence Extractor v1.0</p>
+          </div>
+        </>
+      )}
     </aside>
   );
+}
+
+function StatusDot({ phase }) {
+  const dots = {
+    idle: 'bg-white/30',
+    uploading: 'bg-blue-400 animate-pulse',
+    uploaded: 'bg-green-400',
+    running: 'bg-amber-400 animate-pulse',
+    done: 'bg-green-400',
+    error: 'bg-red-400',
+  };
+  return <span className={`w-2.5 h-2.5 rounded-full ${dots[phase] || dots.idle}`} />;
 }
 
 function StatusIndicator({ phase }) {

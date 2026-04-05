@@ -127,13 +127,13 @@ function AppraisalCard({ appraisal, index }) {
                         <tr key={i} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-2.5 px-3 text-xs text-gray-400 align-top">{i + 1}</td>
                           <td className="py-2.5 px-3 text-xs text-gray-700 align-top leading-relaxed">
-                            {truncate(criterion, 100)}
+                            {criterion}
                           </td>
                           <td className="py-2.5 px-3 align-top">
                             <RatingBadge rating={rating} />
                           </td>
-                          <td className="py-2.5 px-3 text-xs text-gray-600 align-top leading-relaxed">
-                            {truncate(justification, 200)}
+                          <td className="py-2.5 px-3 text-xs text-gray-600 align-top leading-relaxed whitespace-pre-wrap">
+                            {justification}
                           </td>
                         </tr>
                       );

@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download, FileText } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
 import StepIndicator from './components/StepIndicator.jsx';
 import UploadZone from './components/UploadZone.jsx';
@@ -7,6 +7,7 @@ import MetricsBar from './components/MetricsBar.jsx';
 import EvidenceTab from './components/EvidenceTab.jsx';
 import AppraisalTab from './components/AppraisalTab.jsx';
 import DownloadTab from './components/DownloadTab.jsx';
+import PdfViewer from './components/PdfViewer.jsx';
 import {
   uploadFiles,
   runPipeline,
@@ -30,6 +31,7 @@ const TABS = [
 
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [phase, setPhase] = useState('idle'); // idle | uploading | uploaded | running | done | error
   const [files, setFiles] = useState([]);
   const [markdownFiles, setMarkdownFiles] = useState([]);
@@ -38,6 +40,44 @@ export default function App() {
   const [elapsedMs, setElapsedMs] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [activeTab, setActiveTab] = useState('evidence');
+  const [showPdf, setShowPdf] = useState(false);
+  const [pdfWidthPct, setPdfWidthPct] = useState(45); // % of main area
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartPct = useRef(45);
+  const mainRef = useRef(null);
+
+  const handleDividerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartPct.current = pdfWidthPct;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [pdfWidthPct]);
+
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (!isDragging.current || !mainRef.current) return;
+      const mainWidth = mainRef.current.getBoundingClientRect().width;
+      const deltaX = e.clientX - dragStartX.current;
+      const deltaPct = (deltaX / mainWidth) * 100;
+      const newPct = Math.min(75, Math.max(20, dragStartPct.current - deltaPct));
+      setPdfWidthPct(newPct);
+    }
+    function onMouseUp() {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 
   // --- Upload phase ---
   const handleUpload = useCallback(async () => {
@@ -143,14 +183,19 @@ export default function App() {
         onApiUrlChange={setApiUrl}
         onReset={handleReset}
         phase={phase}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen((v) => !v)}
       />
 
       {/* Main content */}
       <main
-        className="flex-1 min-h-screen"
-        style={{ marginLeft: 260 }}
+        ref={mainRef}
+        className={`flex-1 transition-all duration-200 ${showPdf && phase === 'done' ? 'flex overflow-hidden h-screen' : 'min-h-screen'}`}
+        style={{ marginLeft: sidebarOpen ? 260 : 48 }}
       >
-        <div className="max-w-5xl mx-auto px-8 py-10">
+        {/* Results + scrollable content */}
+        <div className={`${showPdf && phase === 'done' ? 'flex-1 overflow-y-auto' : ''}`}>
+        <div className={showPdf && phase === 'done' ? 'px-6 py-8' : 'max-w-5xl mx-auto px-8 py-10'}>
           {/* Page header */}
           <div className="mb-8">
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
@@ -234,8 +279,8 @@ export default function App() {
                 elapsedMs={elapsedMs}
               />
 
-              {/* Tabs */}
-              <div className="mb-4">
+              {/* Tab bar + PDF toggle */}
+              <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-gray-100 shadow-card inline-flex">
                   {TABS.map(({ id, label, icon: Icon }) => (
                     <button
@@ -250,30 +295,33 @@ export default function App() {
                       <Icon size={14} />
                       {label}
                       {id === 'evidence' && papers.length > 0 && (
-                        <span
-                          className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
-                            activeTab === id
-                              ? 'bg-white/20 text-white'
-                              : 'bg-gray-100 text-gray-500'
-                          }`}
-                        >
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${activeTab === id ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
                           {papers.length}
                         </span>
                       )}
                       {id === 'appraisal' && appraisals.length > 0 && (
-                        <span
-                          className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
-                            activeTab === id
-                              ? 'bg-white/20 text-white'
-                              : 'bg-gray-100 text-gray-500'
-                          }`}
-                        >
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${activeTab === id ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
                           {appraisals.length}
                         </span>
                       )}
                     </button>
                   ))}
                 </div>
+
+                {/* PDF viewer toggle — only shown when files are available */}
+                {files.length > 0 && (
+                  <button
+                    onClick={() => setShowPdf((v) => !v)}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all duration-150 ${
+                      showPdf
+                        ? 'bg-[#1B2A4A] text-white border-[#1B2A4A]'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <FileText size={14} />
+                    {showPdf ? 'Hide PDF' : 'View PDF'}
+                  </button>
+                )}
               </div>
 
               {/* Tab content */}
@@ -284,7 +332,33 @@ export default function App() {
               </div>
             </>
           )}
-        </div>
+        </div>{/* inner content wrapper */}
+        </div>{/* outer scroll wrapper */}
+
+        {/* Drag divider + PDF viewer panel */}
+        {showPdf && phase === 'done' && (
+          <>
+            {/* Drag handle */}
+            <div
+              onMouseDown={handleDividerMouseDown}
+              className="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-[#1B2A4A]/20 active:bg-[#1B2A4A]/40 transition-colors relative group"
+              style={{ background: '#E2E8F0' }}
+              title="Drag to resize"
+            >
+              {/* Grip dots */}
+              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {[0,1,2].map(i => (
+                  <span key={i} className="w-1 h-1 rounded-full bg-gray-400" />
+                ))}
+              </div>
+            </div>
+
+            {/* PDF panel */}
+            <div className="flex-shrink-0 sticky top-0 h-screen" style={{ width: `${pdfWidthPct}%` }}>
+              <PdfViewer files={files} onClose={() => setShowPdf(false)} />
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
