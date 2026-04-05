@@ -5,11 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # env vars injected by Coolify UI — no env_file needed in production
-    # for local dev: run  docker compose --env-file .env up
-    env_file:
-      - path: .env
-        required: false
+    ports:
+      - "7777:7777"
     volumes:
       - ./tmp:/app/tmp
     restart: unless-stopped
@@ -18,6 +15,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
 
   # ── React frontend (nginx) ─────────────────────────────────────────────────
   frontend:
@@ -25,9 +23,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: /api   # nginx proxies /api/* → backend:7777/*
-    # No ports: block — Coolify's Traefik proxy owns 80/443.
-    # In Coolify UI → this service → set Port = 80
+        VITE_API_BASE_URL: /api
+    environment:
+      # Coolify reads SERVICE_FQDN_<SERVICE>_<PORT> to wire up Traefik routing.
+      # Set SERVICE_FQDN_FRONTEND_80=https://your-frontend-domain in Coolify UI
+      # so Traefik routes your domain → this container port 80 (no host binding needed).
+      SERVICE_FQDN_FRONTEND_80: ${SERVICE_FQDN_FRONTEND_80:-}
     depends_on:
       backend:
         condition: service_healthy
