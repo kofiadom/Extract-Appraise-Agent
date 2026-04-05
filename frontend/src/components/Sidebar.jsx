@@ -105,7 +105,7 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen
                   onKeyDown={handleKeyDown}
                   autoFocus
                   className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-xs border border-white/20 focus:outline-none focus:border-white/40 placeholder-white/30"
-                  placeholder="http://localhost:7777"
+                  placeholder="/extract-appraise/backend"
                 />
                 <div className="flex gap-2">
                   <button
