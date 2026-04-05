@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+venv/
+.venv/
+
+# Secrets & runtime outputs
+.env
+tmp/
+*.xlsx
+*.docx
+*.json
+
+# Git
+.git/
+.gitignore
