@@ -24,11 +24,12 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: /api
-    environment:
-      # Coolify reads SERVICE_FQDN_<SERVICE>_<PORT> to wire up Traefik routing.
-      # Set SERVICE_FQDN_FRONTEND_80=https://your-frontend-domain in Coolify UI
-      # so Traefik routes your domain → this container port 80 (no host binding needed).
-      SERVICE_FQDN_FRONTEND_80: ${SERVICE_FQDN_FRONTEND_80:-}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`staging.codinnovations.com`)"
+      - "traefik.http.routers.frontend.entrypoints=https"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
     depends_on:
       backend:
         condition: service_healthy
