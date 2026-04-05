@@ -82,6 +82,8 @@ evidence_team = Team(
 _state: dict = {}
 
 # ── Custom FastAPI app ────────────────────────────────────────────────────────
+ROOT_PATH = os.getenv("ROOT_PATH", "")
+
 app = FastAPI(
     title="REST Evidence Extractor",
     description=(
@@ -89,6 +91,7 @@ app = FastAPI(
         "then run POST /teams/fs-evidence-team/runs to extract evidence and appraise quality."
     ),
     version="1.0.0",
+    root_path=ROOT_PATH,
 )
 
 # Dev origins always allowed; production origins come from CORS_ORIGINS env var

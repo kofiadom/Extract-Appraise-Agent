@@ -21,7 +21,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: /api
+        VITE_API_BASE_URL: /extract-appraise/backend
+        VITE_BASE_PATH: /extract-appraise/frontend/
     environment:
       SERVICE_FQDN_FRONTEND: ${SERVICE_FQDN_FRONTEND}
     depends_on:
