@@ -19,9 +19,9 @@ import {
 } from './services/api.js';
 
 const DEFAULT_API_URL =
-  typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
+  typeof import.meta !== 'undefined' && import.meta.env.VITE_API_BASE_URL
     ? import.meta.env.VITE_API_BASE_URL
-    : import.meta.env?.DEV
+    : import.meta.env.DEV
       ? 'http://localhost:7777'
       : window.location.pathname.replace(/\/frontend\/?.*$/, '/backend');
 
