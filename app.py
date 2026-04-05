@@ -82,7 +82,7 @@ evidence_team = Team(
 _state: dict = {}
 
 # ── Custom FastAPI app ────────────────────────────────────────────────────────
-ROOT_PATH = os.getenv("ROOT_PATH", "")
+ROOT_PATH = os.getenv("ROOT_PATH", "/extract-appraise/backend")
 
 app = FastAPI(
     title="REST Evidence Extractor",
