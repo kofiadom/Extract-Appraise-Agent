@@ -5,8 +5,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "7777:7777"
     volumes:
       - ./tmp:/app/tmp
     restart: unless-stopped
@@ -24,12 +22,8 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: /api
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`staging.codinnovations.com`)"
-      - "traefik.http.routers.frontend.entrypoints=https"
-      - "traefik.http.routers.frontend.tls=true"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    environment:
+      SERVICE_FQDN_FRONTEND: ${SERVICE_FQDN_FRONTEND}
     depends_on:
       backend:
         condition: service_healthy
