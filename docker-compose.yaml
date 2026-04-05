@@ -27,8 +27,6 @@ services:
       args:
         VITE_API_BASE_URL: /api   # nginx proxies /api/* → backend:7777/*
     container_name: rest-frontend
-    ports:
-      - "80:80"          # Open http://localhost to use the app
     depends_on:
       backend:
         condition: service_healthy
