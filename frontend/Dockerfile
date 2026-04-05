@@ -8,12 +8,12 @@ RUN npm ci --silent
 
 COPY . .
 
-# In Docker, API calls go through Coolify's proxy to the backend service
-ARG VITE_API_BASE_URL=/api
+# API base URL — default matches production Coolify subpath
+ARG VITE_API_BASE_URL=/extract-appraise/backend
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-# Base path for asset URLs (must match the Coolify subpath with trailing slash)
-ARG VITE_BASE_PATH=/
+# Base path for asset URLs — must match Coolify subpath with trailing slash
+ARG VITE_BASE_PATH=/extract-appraise/frontend/
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
 
 RUN npm run build
