@@ -93,24 +93,33 @@ app = FastAPI(
 
 # Dev origins always allowed; production origins come from CORS_ORIGINS env var
 # e.g. CORS_ORIGINS=https://your-domain.com,https://www.your-domain.com
-_cors_origins = [
-    "http://localhost:5173",   # Vite dev server
-    "http://localhost:4173",   # Vite preview
-    "http://127.0.0.1:5173",
-    "http://localhost",        # Docker frontend (port 80)
-    "http://localhost:80",
-]
-_extra = os.getenv("CORS_ORIGINS", "")
-if _extra:
-    _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_env = os.getenv("CORS_ORIGINS", "")
+if _cors_env.strip() == "*":
+    # Wildcard — allow all origins (useful for Coolify PoC deployments)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,   # credentials + wildcard not allowed by spec
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    _cors_origins = [
+        "http://localhost:5173",   # Vite dev server
+        "http://localhost:4173",   # Vite preview
+        "http://127.0.0.1:5173",
+        "http://localhost",        # Docker frontend (port 80)
+        "http://localhost:80",
+    ]
+    if _cors_env:
+        _cors_origins.extend(o.strip() for o in _cors_env.split(",") if o.strip())
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.post("/pipeline/store", tags=["Downloads"])
@@ -224,12 +233,6 @@ async def upload_for_filesearch(files: list[UploadFile]):
     return {"files": saved_paths, "markdown_files": markdown_files}
 
 
-@app.get("/health", tags=["Health"], include_in_schema=False)
-async def health():
-    """Lightweight health-check used by Docker / Coolify."""
-    return {"status": "ok"}
-
-
 # ── AgentOS ───────────────────────────────────────────────────────────────────
 agent_os = AgentOS(
     name="REST Evidence Extractor",
@@ -239,6 +242,30 @@ agent_os = AgentOS(
 )
 
 app = agent_os.get_app()
+
+
+# ── Health check (registered on the final app after AgentOS wrapping) ─────────
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Lightweight health-check used by Docker / Coolify."""
+    return {"status": "ok"}
+
+
+# ── Override OpenAPI schema generation to catch errors ─────────────────────────
+_original_openapi = app.openapi
+
+def _safe_openapi():
+    try:
+        return _original_openapi()
+    except Exception as exc:
+        logger.error("OpenAPI schema generation failed: %s", exc)
+        return {
+            "openapi": "3.1.0",
+            "info": {"title": "REST Evidence Extractor", "version": "1.0.0"},
+            "paths": {},
+        }
+
+app.openapi = _safe_openapi
 
 
 if __name__ == "__main__":
