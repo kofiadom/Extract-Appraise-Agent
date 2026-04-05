@@ -224,6 +224,12 @@ async def upload_for_filesearch(files: list[UploadFile]):
     return {"files": saved_paths, "markdown_files": markdown_files}
 
 
+@app.get("/health", tags=["Health"], include_in_schema=False)
+async def health():
+    """Lightweight health-check used by Docker / Coolify."""
+    return {"status": "ok"}
+
+
 # ── AgentOS ───────────────────────────────────────────────────────────────────
 agent_os = AgentOS(
     name="REST Evidence Extractor",

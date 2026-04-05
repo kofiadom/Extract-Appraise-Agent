@@ -5,16 +5,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: rest-backend
-    ports:
-      - "7777:7777"      # Also exposed directly for debugging / API docs
+    # env vars injected by Coolify UI — no env_file needed in production
+    # for local dev: run  docker compose --env-file .env up
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
-      - ./tmp:/app/tmp   # Persist uploaded PDFs and converted markdown
+      - ./tmp:/app/tmp
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7777/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:7777/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -26,7 +26,8 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: /api   # nginx proxies /api/* → backend:7777/*
-    container_name: rest-frontend
+    # No ports: block — Coolify's Traefik proxy owns 80/443.
+    # In Coolify UI → this service → set Port = 80
     depends_on:
       backend:
         condition: service_healthy
