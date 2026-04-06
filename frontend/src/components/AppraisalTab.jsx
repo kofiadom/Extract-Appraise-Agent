@@ -23,19 +23,6 @@ function RatingBadge({ rating }) {
   );
 }
 
-function QualityBadge({ score }) {
-  if (!score) return null;
-  const s = String(score).toLowerCase().trim();
-  if (s.includes('high')) return <span className="badge-high">High</span>;
-  if (s.includes('moderate') || s.includes('medium')) return <span className="badge-moderate">Moderate</span>;
-  if (s.includes('low')) return <span className="badge-low">Low</span>;
-  return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
-      {score}
-    </span>
-  );
-}
-
 function AppraisalCard({ appraisal, index }) {
   const [expanded, setExpanded] = useState(true);
 
@@ -45,10 +32,8 @@ function AppraisalCard({ appraisal, index }) {
     appraisal.paper_reference ||
     appraisal.title ||
     `Paper ${index + 1}`;
-  const quality = appraisal.overall_quality || appraisal.quality_score || appraisal.quality || '';
+  const qualityScore = appraisal.quality_score || appraisal.overall_quality || appraisal.quality || '';
   const studyType = appraisal.study_type || appraisal.study_design || '';
-  const score = appraisal.score || appraisal.total_score || '';
-  const ratingLabel = appraisal.rating || appraisal.overall_rating || '';
   const criteria = appraisal.criteria || appraisal.appraisal_criteria || [];
   const strengths = Array.isArray(appraisal.strengths)
     ? appraisal.strengths
@@ -75,12 +60,11 @@ function AppraisalCard({ appraisal, index }) {
                   {studyType}
                 </span>
               )}
-              {score !== '' && score !== null && score !== undefined && (
+              {qualityScore && (
                 <span className="text-xs text-gray-500">
-                  Score: <span className="font-semibold text-gray-700">{score}</span>
+                  Score: <span className="font-semibold text-gray-700">{qualityScore}</span>
                 </span>
               )}
-              <QualityBadge score={quality || ratingLabel} />
             </div>
           </div>
         </div>
@@ -195,8 +179,9 @@ function AppraisalCard({ appraisal, index }) {
 }
 
 const KNOWN_APPRAISAL_KEYS = new Set([
-  'reference', 'citation', 'paper_reference', 'title', 'overall_quality', 'quality_score',
-  'quality', 'study_type', 'study_design', 'score', 'total_score', 'rating', 'overall_rating',
+  'article_reference', 'reference', 'citation', 'paper_reference', 'title',
+  'quality_score', 'overall_quality', 'quality',
+  'study_type', 'study_design',
   'criteria', 'appraisal_criteria', 'strengths', 'limitations',
 ]);
 

@@ -209,15 +209,6 @@ class PaperAppraisal(BaseModel):
             '(criteria NOT rated N/A). E.g., "14/18".'
         ),
     )
-    quality_rating: Literal["High", "Moderate", "Low"] = Field(
-        ...,
-        description=(
-            "Overall quality rating: "
-            "High = ≥75% of applicable criteria met (Yes or Partial); "
-            "Moderate = 50–74%; "
-            "Low = <50%."
-        ),
-    )
     strengths: str = Field(
         ...,
         description="Key methodological strengths of the study (2-4 sentences).",

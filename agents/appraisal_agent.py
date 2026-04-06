@@ -81,11 +81,6 @@ For N/A criteria: briefly explain in one sentence why the criterion does not app
 1. Count the total criteria NOT rated "N/A" → this is Y (applicable count).
 2. Count the criteria rated "Yes" OR "Partial" → this is X (met count).
 3. quality_score = "X/Y" (e.g., "14/18").
-4. quality_rating:
-   - "High"     if X ÷ Y ≥ 0.75 (75% or more)
-   - "Moderate" if X ÷ Y is 0.50–0.74
-   - "Low"      if X ÷ Y < 0.50
-
 ## IMPORTANT RULES
 
 - Always call read_file for each markdown filename BEFORE rating any criterion.
@@ -107,7 +102,7 @@ APPRAISAL_STANDALONE_PROMPT_FS = (
     '{"appraisals": [{"article_reference": "...", "study_type": "...", '
     '"criteria": [{"criterion_id": 1, "question": "...", "rating": "Yes|Partial|No|N/A", '
     '"justification": "..."}], '
-    '"quality_score": "X/Y", "quality_rating": "High|Moderate|Low", '
+    '"quality_score": "X/Y", '
     '"strengths": "...", "limitations": "..."}]}'
 )
 

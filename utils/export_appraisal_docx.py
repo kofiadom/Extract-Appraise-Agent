@@ -29,7 +29,6 @@ COLOUR_PARTIAL_BG  = RGBColor(0xFE, 0xF3, 0xC7)   # Light amber
 COLOUR_NO_BG       = RGBColor(0xFE, 0xD7, 0xD7)   # Light red
 COLOUR_NA_BG       = RGBColor(0xF0, 0xF0, 0xF0)   # Light grey
 COLOUR_HIGH        = RGBColor(0x22, 0x54, 0x3D)   # Dark green
-COLOUR_MODERATE    = RGBColor(0x92, 0x40, 0x0E)   # Dark amber
 COLOUR_LOW         = RGBColor(0x74, 0x2A, 0x2A)   # Dark red
 COLOUR_BODY_TEXT   = RGBColor(0x2D, 0x37, 0x48)   # Dark slate
 
@@ -45,12 +44,6 @@ RATING_ICON = {
     "Partial": "⚠️  Partial",
     "No":      "❌  No",
     "N/A":     "—  N/A",
-}
-
-QUALITY_COLOUR = {
-    "High":     COLOUR_HIGH,
-    "Moderate": COLOUR_MODERATE,
-    "Low":      COLOUR_LOW,
 }
 
 
@@ -206,16 +199,9 @@ def export_appraisal_to_docx(
         study_run.font.bold = True
         study_run.font.color.rgb = COLOUR_BODY_TEXT
 
-        score_run = score_p.add_run(f"Quality score: {appraisal.quality_score}     ")
+        score_run = score_p.add_run(f"Quality score: {appraisal.quality_score}")
         score_run.font.size = Pt(10)
         score_run.font.bold = True
-
-        rating_run = score_p.add_run(f"Overall rating: {appraisal.quality_rating}")
-        rating_run.font.size = Pt(10)
-        rating_run.font.bold = True
-        rating_run.font.color.rgb = QUALITY_COLOUR.get(
-            appraisal.quality_rating, COLOUR_BODY_TEXT
-        )
 
         doc.add_paragraph()  # spacer
 
