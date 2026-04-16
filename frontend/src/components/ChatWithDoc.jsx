@@ -3,7 +3,32 @@ import {
   UploadCloud, FileText, Send, Loader2, Trash2, X,
   BookOpen, ChevronDown, AlertCircle, Bot, User,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { indexDocument, listChatDocuments, deleteChatDocument, chatQueryStream } from '../services/api.js';
+
+// Markdown component overrides — styled for the chat bubble context
+const MD_COMPONENTS = {
+  p:          ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  h1:         ({ children }) => <p className="font-bold text-base mb-1">{children}</p>,
+  h2:         ({ children }) => <p className="font-bold mb-1">{children}</p>,
+  h3:         ({ children }) => <p className="font-semibold mb-1">{children}</p>,
+  ul:         ({ children }) => <ul className="list-disc list-outside pl-4 mb-2 space-y-0.5">{children}</ul>,
+  ol:         ({ children }) => <ol className="list-decimal list-outside pl-4 mb-2 space-y-0.5">{children}</ol>,
+  li:         ({ children }) => <li className="leading-snug">{children}</li>,
+  strong:     ({ children }) => <strong className="font-semibold">{children}</strong>,
+  em:         ({ children }) => <em className="italic">{children}</em>,
+  a:          ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2 opacity-80 hover:opacity-100">{children}</a>,
+  blockquote: ({ children }) => <blockquote className="border-l-2 border-current pl-3 opacity-70 my-1">{children}</blockquote>,
+  hr:         () => <hr className="my-2 border-current opacity-20" />,
+  code:       ({ inline, children }) =>
+    inline
+      ? <code className="bg-black/10 rounded px-1 py-0.5 text-xs font-mono">{children}</code>
+      : <pre className="bg-black/10 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono whitespace-pre-wrap"><code>{children}</code></pre>,
+  table:      ({ children }) => <div className="overflow-x-auto my-2"><table className="text-xs border-collapse w-full">{children}</table></div>,
+  th:         ({ children }) => <th className="border border-current/20 px-2 py-1 font-semibold bg-black/5 text-left">{children}</th>,
+  td:         ({ children }) => <td className="border border-current/20 px-2 py-1">{children}</td>,
+};
 
 // Renders a single chat message bubble
 function MessageBubble({ msg }) {
@@ -27,7 +52,7 @@ function MessageBubble({ msg }) {
           </div>
         )}
         <div
-          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
+          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed
             ${isUser
               ? 'bg-[#1B2A4A] text-white rounded-tr-sm'
               : 'bg-white border border-gray-100 text-gray-800 shadow-card rounded-tl-sm'
@@ -35,7 +60,13 @@ function MessageBubble({ msg }) {
             ${msg.isError ? 'bg-red-50 border-red-200 text-red-700' : ''}
           `}
         >
-          {msg.content}
+          {isUser ? (
+            <span className="whitespace-pre-wrap">{msg.content}</span>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+              {msg.content}
+            </ReactMarkdown>
+          )}
           {msg.isStreaming && (
             <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-500 rounded-sm animate-pulse align-middle" />
           )}
