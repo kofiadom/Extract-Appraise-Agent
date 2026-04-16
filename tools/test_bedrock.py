@@ -12,9 +12,11 @@ client = boto3.client(
     aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
 )
 
-model_id = "moonshotai.kimi-k2.5"
+model_id = "us.anthropic.claude-sonnet-4-6"
 
 payload = {
+    "anthropic_version": "bedrock-2023-05-31",
+    "max_tokens": 500,
     "messages": [
         {"role": "user", "content": [{"type": "text", "text": "Say hello and tell me what model you are."}]}
     ]

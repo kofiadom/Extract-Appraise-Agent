@@ -7,19 +7,29 @@ Run:
     fastapi dev app.py          # dev mode with hot-reload
 
 AgentOS endpoints:
-    POST /agents/fs-extraction-agent/runs  -> Run extraction agent directly
-    POST /agents/fs-appraisal-agent/runs   -> Run appraisal agent directly
-    POST /teams/fs-evidence-team/runs      -> Run full pipeline (extract → appraise)
+    POST /agents/fs-extraction-agent/runs    -> Run extraction agent directly
+    POST /agents/fs-appraisal-agent/runs     -> Run appraisal agent directly
+    POST /teams/fs-evidence-team/runs        -> Run full pipeline (extract → appraise)
+    POST /agents/pageindex-chat-agent/runs   -> Chat with an indexed document (PageIndex)
 
 Custom endpoints:
-    POST /upload-fs               -> Upload PDFs, convert to markdown via LlamaParse
-    POST /pipeline/store          -> Store team run results (called by demo UI)
-    GET  /pipeline/download/excel -> Download evidence table (.xlsx)
-    GET  /pipeline/download/docx  -> Download quality appraisal (.docx)
-    GET  /pipeline/download/json  -> Download full results (.json)
-    DELETE /pipeline/reset        -> Clear stored results
+    POST   /upload-fs                  -> Upload PDFs, convert to markdown via LlamaParse
+    POST   /pipeline/store             -> Store team run results (called by demo UI)
+    GET    /pipeline/download/excel    -> Download evidence table (.xlsx)
+    GET    /pipeline/download/docx     -> Download quality appraisal (.docx)
+    GET    /pipeline/download/json     -> Download full results (.json)
+    DELETE /pipeline/reset             -> Clear stored results
+
+    POST   /chat/index                 -> Upload & index a PDF with PageIndex
+    GET    /chat/documents             -> List indexed documents
+    DELETE /chat/document/{doc_id}     -> Remove an indexed document
+
+Required .env vars for Chat with Doc:
+    PAGEINDEX_API_KEY   — get from https://pageindex.ai/developer
+    (indexing is handled by the PageIndex cloud; no local LLM needed for that step)
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -46,6 +56,7 @@ from agno.team.mode import TeamMode
 
 from agents.extraction_agent import create_filesearch_extraction_agent, EXTRACTION_PROMPT_FS
 from agents.appraisal_agent import create_filesearch_appraisal_agent, APPRAISAL_STANDALONE_PROMPT_FS
+from agents.chat_agent import create_chat_agent
 from core.appraisal_schemas import AppraisalResult
 from core.schemas import ExtractionResult
 from utils.export_appraisal_docx import export_appraisal_to_docx
@@ -55,11 +66,48 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "zai.glm-5")
 
+# ── PageIndex (Chat with Doc — self-hosted) ────────────────────────────────────
+# Uses the local pageindex/ package. Tree indexing runs via boto3 → Bedrock.
+# Model is set in pageindex/config.yaml (default: bedrock/us.anthropic.claude-sonnet-4-6).
+# Override with PAGEINDEX_INDEX_MODEL env var if needed.
+PAGEINDEX_WORKSPACE = Path("tmp/pageindex_workspace")
+PAGEINDEX_PAPERS_DIR = Path("tmp/pageindex_papers")
+_pageindex_client = None
+
+
+def get_pageindex_client():
+    """
+    Lazily initialise the self-hosted PageIndexClient.
+    Workspace is persisted to disk so indexed documents survive server restarts.
+    Model resolution order:
+      1. PAGEINDEX_INDEX_MODEL env var (explicit override)
+      2. pageindex/config.yaml default  (bedrock/us.anthropic.claude-sonnet-4-6)
+    AWS credentials are read from the standard env vars already in .env.
+    """
+    global _pageindex_client
+    if _pageindex_client is None:
+        from pageindex import PageIndexClient
+        PAGEINDEX_WORKSPACE.mkdir(parents=True, exist_ok=True)
+        index_model = os.getenv("PAGEINDEX_INDEX_MODEL") or None  # None → use config.yaml default
+        _pageindex_client = PageIndexClient(
+            workspace=str(PAGEINDEX_WORKSPACE),
+            model=index_model,
+        )
+        logger.info(
+            "PageIndex self-hosted client initialised (model=%s, workspace=%s)",
+            _pageindex_client.model, PAGEINDEX_WORKSPACE,
+        )
+    return _pageindex_client
+
+
 FS_PAPERS_DIR = Path("tmp/papers_fs")
 
 # ── FileSearch agents ─────────────────────────────────────────────────────────
 extraction_agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID)
 appraisal_agent = create_filesearch_appraisal_agent(DEFAULT_MODEL_ID)
+
+# ── PageIndex chat agent (registered with AgentOS — uses /agents/pageindex-chat-agent/runs)
+chat_agent = create_chat_agent(get_pageindex_client, DEFAULT_MODEL_ID)
 
 evidence_team = Team(
     id="fs-evidence-team",
@@ -227,10 +275,95 @@ async def upload_for_filesearch(files: list[UploadFile]):
     return {"files": saved_paths, "markdown_files": markdown_files}
 
 
+# ── Chat with Doc — document management endpoints ─────────────────────────────
+# The chat QUERY is handled by AgentOS at POST /agents/pageindex-chat-agent/runs.
+# These three endpoints cover upload/index, listing, and removal only.
+
+@app.post("/chat/index", tags=["Chat"])
+async def chat_index_document(file: UploadFile):
+    """
+    Upload a PDF and index it with self-hosted PageIndex (LiteLLM → Bedrock).
+    Builds a hierarchical tree structure — expect 1-3 min for a typical paper.
+    Returns the doc_id to pass to POST /agents/pageindex-chat-agent/runs.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    PAGEINDEX_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+    pdf_path = PAGEINDEX_PAPERS_DIR / file.filename
+    pdf_path.write_bytes(await file.read())
+    logger.info("Saved PDF for PageIndex indexing: %s", pdf_path)
+
+    try:
+        client = get_pageindex_client()
+        # client.index() is CPU/IO-bound and can take minutes — run in thread pool
+        doc_id = await asyncio.to_thread(client.index, str(pdf_path))
+    except Exception as exc:
+        logger.error("PageIndex indexing failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Indexing failed: {exc}")
+
+    doc_info = client.documents.get(doc_id, {})
+    return {
+        "doc_id": doc_id,
+        "filename": file.filename,
+        "status": "indexed",
+        "page_count": doc_info.get("page_count"),
+    }
+
+
+@app.get("/chat/documents", tags=["Chat"])
+async def chat_list_documents():
+    """List all documents indexed in the local PageIndex workspace."""
+    client = get_pageindex_client()
+    docs = [
+        {
+            "doc_id": doc_id,
+            "doc_name": info.get("doc_name", info.get("path", "Unknown")),
+            "status": "indexed",
+            "page_count": info.get("page_count"),
+        }
+        for doc_id, info in client.documents.items()
+    ]
+    return {"documents": docs}
+
+
+@app.get("/chat/document/{doc_id}", tags=["Chat"])
+async def chat_get_document(doc_id: str):
+    """Fetch the full indexed document (metadata + tree structure) by doc_id."""
+    client = get_pageindex_client()
+    if doc_id not in client.documents:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    client._ensure_doc_loaded(doc_id)
+    info = client.documents[doc_id]
+    return {
+        "doc_id": doc_id,
+        "doc_name": info.get("doc_name", info.get("path", "Unknown")),
+        "doc_description": info.get("doc_description"),
+        "status": "indexed",
+        "page_count": info.get("page_count"),
+        "type": info.get("type"),
+        "structure": info.get("structure"),
+    }
+
+
+@app.delete("/chat/document/{doc_id}", tags=["Chat"])
+async def chat_remove_document(doc_id: str):
+    """Remove an indexed document from the local PageIndex workspace."""
+    client = get_pageindex_client()
+    if doc_id not in client.documents:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    client.documents.pop(doc_id, None)
+    for p in PAGEINDEX_WORKSPACE.glob(f"{doc_id}*"):
+        p.unlink(missing_ok=True)
+
+    return {"message": f"Document {doc_id} removed."}
+
+
 # ── AgentOS ───────────────────────────────────────────────────────────────────
 agent_os = AgentOS(
     name="REST Evidence Extractor",
-    agents=[extraction_agent, appraisal_agent],
+    agents=[extraction_agent, appraisal_agent, chat_agent],
     teams=[evidence_team],
     base_app=app,
 )

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download, FileText } from 'lucide-react';
+import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download, FileText, MessageSquare, FlaskConical } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
 import StepIndicator from './components/StepIndicator.jsx';
 import UploadZone from './components/UploadZone.jsx';
@@ -8,6 +8,7 @@ import EvidenceTab from './components/EvidenceTab.jsx';
 import AppraisalTab from './components/AppraisalTab.jsx';
 import DownloadTab from './components/DownloadTab.jsx';
 import PdfViewer from './components/PdfViewer.jsx';
+import ChatWithDoc from './components/ChatWithDoc.jsx';
 import {
   uploadFiles,
   runPipeline,
@@ -31,8 +32,14 @@ const TABS = [
   { id: 'downloads', label: 'Downloads', icon: Download },
 ];
 
+const APP_MODES = [
+  { id: 'extractor', label: 'Evidence Extractor', icon: FlaskConical },
+  { id: 'chat',      label: 'Chat with Doc',      icon: MessageSquare },
+];
+
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+  const [appMode, setAppMode] = useState('extractor'); // 'extractor' | 'chat'
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [phase, setPhase] = useState('idle'); // idle | uploading | uploaded | running | done | error
   const [files, setFiles] = useState([]);
@@ -198,15 +205,43 @@ export default function App() {
         {/* Results + scrollable content */}
         <div className={`${showPdf && phase === 'done' ? 'flex-1 overflow-y-auto' : ''}`}>
         <div className={showPdf && phase === 'done' ? 'px-6 py-8' : 'max-w-5xl mx-auto px-8 py-10'}>
-          {/* Page header */}
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-              REST Evidence Extractor
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Upload research papers to extract structured evidence and perform quality appraisal.
-            </p>
+          {/* Page header + mode switcher */}
+          <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+                {appMode === 'extractor' ? 'REST Evidence Extractor' : 'Chat with Your Document'}
+              </h1>
+              <p className="text-sm text-gray-500 mt-1">
+                {appMode === 'extractor'
+                  ? 'Upload research papers to extract structured evidence and perform quality appraisal.'
+                  : 'Index any PDF with PageIndex and ask questions using vectorless, reasoning-based retrieval.'}
+              </p>
+            </div>
+
+            {/* Mode toggle */}
+            <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-gray-100 shadow-card flex-shrink-0">
+              {APP_MODES.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setAppMode(id)}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                    appMode === id
+                      ? 'bg-[#1B2A4A] text-white shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <Icon size={14} />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* ── Chat with Doc mode ── */}
+          {appMode === 'chat' && <ChatWithDoc apiUrl={apiUrl} />}
+
+          {/* ── Evidence Extractor mode ── */}
+          {appMode === 'extractor' && <>
 
           {/* Step indicator */}
           <StepIndicator phase={phase} />
@@ -334,6 +369,7 @@ export default function App() {
               </div>
             </>
           )}
+          </>}{/* end appMode === 'extractor' */}
         </div>{/* inner content wrapper */}
         </div>{/* outer scroll wrapper */}
 

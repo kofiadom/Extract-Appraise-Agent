@@ -189,3 +189,151 @@ export function estimateCost(modelId, inputTokens, outputTokens) {
 }
 
 export { PRICING };
+
+// ── Chat with Doc (PageIndex) ──────────────────────────────────────────────
+
+/**
+ * Upload a PDF and index it with PageIndex.
+ * @param {string} baseURL
+ * @param {File} file
+ * @returns {Promise<{ doc_id: string, filename: string, page_count: number|null }>}
+ */
+export async function indexDocument(baseURL, file) {
+  const client = createApiClient(baseURL);
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await client.post('/chat/index', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180_000, // indexing can take up to ~90 s
+  });
+  return res.data;
+}
+
+/**
+ * List all documents indexed in the PageIndex workspace.
+ * @param {string} baseURL
+ * @returns {Promise<{ documents: Array<{ doc_id, doc_name, page_count }> }>}
+ */
+export async function listChatDocuments(baseURL) {
+  const client = createApiClient(baseURL);
+  const res = await client.get('/chat/documents');
+  return res.data;
+}
+
+/**
+ * Remove an indexed document from the PageIndex workspace.
+ * @param {string} baseURL
+ * @param {string} docId
+ */
+export async function deleteChatDocument(baseURL, docId) {
+  const client = createApiClient(baseURL);
+  const res = await client.delete(`/chat/document/${docId}`);
+  return res.data;
+}
+
+/**
+ * Ask a question about an indexed document via the AgentOS chat endpoint.
+ * The message is formatted so the agent can extract the doc_id:
+ *   DOC_ID: <docId>
+ *   Question: <message>
+ *
+ * Returns the full answer string from the agent.
+ *
+ * @param {string} baseURL
+ * @param {string} docId
+ * @param {string} message
+ * @param {Array<{role: string, content: string}>} history  — previous turns for context
+ * @returns {Promise<string>}
+ */
+export async function chatQuery(baseURL, docId, message, sessionId = null) {
+  const client = createApiClient(baseURL);
+
+  const fd = new FormData();
+  fd.append('message', `DOC_ID: ${docId}\nQuestion: ${message}`);
+  fd.append('stream', 'false');
+  fd.append('monitor', 'false');
+  if (sessionId) fd.append('session_id', sessionId);
+
+  const res = await client.post('/agents/pageindex-chat-agent/runs', fd, {
+    timeout: 120_000,
+  });
+
+  // AgentOS returns { content: "...", ... }
+  return res.data?.content ?? res.data?.message ?? JSON.stringify(res.data);
+}
+
+/**
+ * Stream a chat query via AgentOS SSE.
+ * Calls callbacks as events arrive:
+ *   onChunk(text)        — new content token(s)
+ *   onToolCall(toolName) — agent invoked a tool
+ *   onDone()             — stream finished
+ *   onError(err)         — fatal error
+ */
+export async function chatQueryStream(baseURL, docId, message, sessionId = null, callbacks = {}) {
+  const { onChunk, onToolCall, onDone, onError } = callbacks;
+
+  const fd = new FormData();
+  fd.append('message', `DOC_ID: ${docId}\nQuestion: ${message}`);
+  fd.append('stream', 'true');
+  if (sessionId) fd.append('session_id', sessionId);
+
+  const url = baseURL.replace(/\/$/, '') + '/agents/pageindex-chat-agent/runs';
+
+  let response;
+  try {
+    response = await fetch(url, { method: 'POST', body: fd });
+  } catch (err) {
+    onError?.(err);
+    return;
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => `HTTP ${response.status}`);
+    onError?.(new Error(text));
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE blocks are separated by double newline
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() ?? '';
+
+      for (const block of blocks) {
+        for (const line of block.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw || raw === '[DONE]') { onDone?.(); return; }
+
+          let evt;
+          try { evt = JSON.parse(raw); } catch { continue; }
+
+          const eventType = (evt.event ?? '').toLowerCase().replace(/_/g, '');
+          if (eventType === 'runcontent' && evt.content) {
+            onChunk?.(evt.content);
+          } else if (eventType === 'toolcallstarted') {
+            onToolCall?.(evt.tool?.tool_name ?? 'tool');
+          } else if (eventType === 'runcompleted' || eventType === 'runerror') {
+            onDone?.();
+            return;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    onError?.(err);
+    return;
+  }
+
+  onDone?.();
+}
