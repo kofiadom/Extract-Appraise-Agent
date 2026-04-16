@@ -15,10 +15,11 @@ COPY agents/ agents/
 COPY core/ core/
 COPY utils/ utils/
 COPY tools/ tools/
+COPY pageindex/ pageindex/
 COPY app.py .
 
-# Create runtime directories for uploaded files and converted markdown
-RUN mkdir -p tmp/papers_fs tmp/papers_fs_md
+# Create runtime directories for uploaded files, markdown, and PageIndex workspace
+RUN mkdir -p tmp/papers_fs tmp/papers_fs_md tmp/pageindex_workspace tmp/pageindex_papers
 
 EXPOSE 7777
 
