@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -130,6 +131,55 @@ evidence_team = Team(
 # ── In-memory state for downloads ─────────────────────────────────────────────
 _state: dict = {}
 
+# ── Async pipeline jobs ────────────────────────────────────────────────────────
+_pipeline_jobs: dict = {}
+
+
+def _serialize_run(node) -> dict:
+    """Recursively serialize an Agno RunResponse into a plain JSON-safe dict."""
+    if node is None:
+        return {}
+    # Pydantic v2 model
+    if hasattr(node, "model_dump"):
+        try:
+            return node.model_dump(mode="json", exclude_none=True)
+        except Exception:
+            pass
+    # Fallback: build manually from known fields
+    metrics_raw = getattr(node, "metrics", None)
+    metrics = None
+    if metrics_raw is not None:
+        if isinstance(metrics_raw, dict):
+            metrics = metrics_raw
+        elif hasattr(metrics_raw, "__dict__"):
+            metrics = {k: v for k, v in vars(metrics_raw).items() if not k.startswith("_")}
+
+    member_responses = []
+    for m in getattr(node, "member_responses", None) or []:
+        member_responses.append(_serialize_run(m))
+
+    model = getattr(node, "model", None)
+    model_id = model if isinstance(model, str) else getattr(model, "id", None)
+
+    return {
+        "content": getattr(node, "content", None) or "",
+        "metrics": metrics,
+        "model": model_id,
+        "agent_id": getattr(node, "agent_id", None),
+        "member_responses": member_responses,
+    }
+
+
+async def _run_pipeline_bg(job_id: str, message: str) -> None:
+    try:
+        response = await evidence_team.arun(message, stream=False)
+        result = _serialize_run(response)
+        _pipeline_jobs[job_id] = {"status": "done", "result": result}
+        logger.info("Pipeline job %s done (%d chars)", job_id, len(result.get("content", "")))
+    except Exception as exc:
+        logger.error("Pipeline job %s failed: %s", job_id, exc)
+        _pipeline_jobs[job_id] = {"status": "error", "error": str(exc)}
+
 # ── Custom FastAPI app ────────────────────────────────────────────────────────
 ROOT_PATH = os.getenv("ROOT_PATH", "/extract-appraise/backend")
 
@@ -163,6 +213,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.post("/pipeline/run-async", tags=["Pipeline"])
+async def pipeline_run_async(body: dict):
+    """Start the pipeline in the background and return a job_id immediately."""
+    markdown_files: list[str] = body.get("markdown_files", [])
+    if not markdown_files:
+        raise HTTPException(status_code=400, detail="markdown_files is required.")
+    message = (
+        f"Files: {', '.join(markdown_files)}\n\n"
+        "Extract structured evidence from ALL provided markdown files, "
+        "then perform REST quality appraisal on each paper."
+    )
+    job_id = str(uuid.uuid4())
+    _pipeline_jobs[job_id] = {"status": "running"}
+    asyncio.create_task(_run_pipeline_bg(job_id, message))
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/pipeline/job/{job_id}", tags=["Pipeline"])
+async def pipeline_job_status(job_id: str):
+    """Poll the result of an async pipeline job."""
+    job = _pipeline_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
 
 
 @app.post("/pipeline/store", tags=["Downloads"])

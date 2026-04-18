@@ -11,7 +11,8 @@ import PdfViewer from './components/PdfViewer.jsx';
 import ChatWithDoc from './components/ChatWithDoc.jsx';
 import {
   uploadFiles,
-  runPipeline,
+  startPipelineJob,
+  pollPipelineJob,
   storeResults,
   resetPipeline,
   parseTeamContent,
@@ -113,34 +114,34 @@ export default function App() {
     setErrorMsg('');
     const startTs = Date.now();
     try {
-      const raw = await runPipeline(apiUrl, markdownFiles);
-      const elapsed = Date.now() - startTs;
-      setElapsedMs(elapsed);
+      // Start the job — returns immediately, no Cloudflare timeout risk
+      const jobId = await startPipelineJob(apiUrl, markdownFiles);
 
-      // Parse content
+      // Poll every 6 s until done or error
+      let raw;
+      while (true) {
+        await new Promise((r) => setTimeout(r, 6_000));
+        const job = await pollPipelineJob(apiUrl, jobId);
+        if (job.status === 'done') { raw = job.result; break; }
+        if (job.status === 'error') throw new Error(job.error || 'Pipeline failed');
+      }
+
+      setElapsedMs(Date.now() - startTs);
+
       const content = raw?.content ?? (typeof raw === 'string' ? raw : null);
       const parsed = parseTeamContent(content);
-
-      const m = sumMetrics(raw);
-      setMetrics(m);
+      setMetrics(sumMetrics(raw));
 
       if (parsed) {
         setResults(parsed);
-        // Store on backend for downloads
-        try {
-          await storeResults(apiUrl, parsed);
-        } catch {
-          // Non-fatal — downloads won't work but results still shown
-        }
+        try { await storeResults(apiUrl, parsed); } catch { /* non-fatal */ }
         setPhase('done');
         setActiveTab('evidence');
       } else {
-        // We have a response but couldn't parse it — still show what we have
         setResults({ papers: [], appraisal: { appraisals: [] }, _raw: content });
         setPhase('done');
         setErrorMsg(
-          'Pipeline completed but the response could not be parsed into structured data. ' +
-          'Raw content may be shown below.'
+          'Pipeline completed but the response could not be parsed into structured data.'
         );
       }
     } catch (err) {

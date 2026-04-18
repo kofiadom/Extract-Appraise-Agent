@@ -38,41 +38,57 @@ function formatTime(ms) {
   return `${mins}m ${secs}s`;
 }
 
+function shortModelName(id) {
+  if (!id) return 'Unknown';
+  if (id.includes('claude-sonnet')) return 'Claude Sonnet';
+  if (id.includes('claude-haiku')) return 'Claude Haiku';
+  if (id.includes('claude-opus')) return 'Claude Opus';
+  if (id.includes('glm')) return 'GLM-5';
+  if (id.includes('kimi')) return 'Kimi K2';
+  if (id.includes('minimax')) return 'MiniMax M2';
+  return id.split('.').pop();
+}
+
 export default function MetricsBar({ metrics, papersCount, appraised, elapsedMs }) {
   const inputTokens = metrics?.input_tokens ?? 0;
   const outputTokens = metrics?.output_tokens ?? 0;
   const totalTokens = metrics?.total_tokens ?? (inputTokens + outputTokens);
   const costUsd = metrics?.cost_usd ?? 0;
+  const byModel = metrics?.by_model ?? {};
+  const modelEntries = Object.entries(byModel).filter(([, v]) => v.input_tokens || v.output_tokens);
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-      <MetricCard
-        icon={FileText}
-        label="Papers extracted"
-        value={papersCount ?? '—'}
-      />
-      <MetricCard
-        icon={ClipboardCheck}
-        label="Papers appraised"
-        value={appraised ?? '—'}
-      />
-      <MetricCard
-        icon={Zap}
-        label="Total tokens"
-        value={formatTokens(totalTokens)}
-        sub={`${formatTokens(inputTokens)} in / ${formatTokens(outputTokens)} out`}
-      />
-      <MetricCard
-        icon={DollarSign}
-        label="Est. cost"
-        value={formatCost(costUsd)}
-        color="text-green-700"
-      />
-      <MetricCard
-        icon={Clock}
-        label="Total time"
-        value={formatTime(elapsedMs)}
-      />
+    <div className="mb-6 space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <MetricCard icon={FileText} label="Papers extracted" value={papersCount ?? '—'} />
+        <MetricCard icon={ClipboardCheck} label="Papers appraised" value={appraised ?? '—'} />
+        <MetricCard
+          icon={Zap}
+          label="Total tokens"
+          value={formatTokens(totalTokens)}
+          sub={`${formatTokens(inputTokens)} in / ${formatTokens(outputTokens)} out`}
+        />
+        <MetricCard icon={DollarSign} label="Est. cost" value={formatCost(costUsd)} color="text-green-700" />
+        <MetricCard icon={Clock} label="Total time" value={formatTime(elapsedMs)} />
+      </div>
+
+      {/* Per-model breakdown */}
+      {modelEntries.length > 0 && (
+        <div className="card px-5 py-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Cost by model</p>
+          <div className="divide-y divide-gray-50">
+            {modelEntries.map(([modelId, v]) => (
+              <div key={modelId} className="flex items-center justify-between py-1.5 text-xs">
+                <span className="font-medium text-gray-700">{shortModelName(modelId)}</span>
+                <div className="flex items-center gap-4 text-gray-500">
+                  <span>{formatTokens(v.input_tokens)} in / {formatTokens(v.output_tokens)} out</span>
+                  <span className="font-semibold text-gray-700">{formatCost(v.cost_usd)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

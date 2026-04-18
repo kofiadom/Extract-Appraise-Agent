@@ -47,6 +47,18 @@ export async function runPipeline(baseURL, markdownFiles) {
   return res.data;
 }
 
+export async function startPipelineJob(baseURL, markdownFiles) {
+  const client = createApiClient(baseURL);
+  const res = await client.post('/pipeline/run-async', { markdown_files: markdownFiles });
+  return res.data.job_id;
+}
+
+export async function pollPipelineJob(baseURL, jobId) {
+  const client = createApiClient(baseURL);
+  const res = await client.get(`/pipeline/job/${jobId}`);
+  return res.data;
+}
+
 /**
  * Store pipeline results in the backend so downloads work.
  * @param {string} baseURL
@@ -152,23 +164,26 @@ export function parseTeamContent(content) {
  * @param {object} node
  * @returns {{ input_tokens: number, output_tokens: number, total_tokens: number, cost_usd: number }}
  */
-export function sumMetrics(node) {
+export function sumMetrics(node, _byModel = {}) {
   const m = node.metrics || {};
   const inputT = m.input_tokens || 0;
   const outputT = m.output_tokens || 0;
   const totalT = m.total_tokens || inputT + outputT;
-  // Use reported cost; fall back to per-node estimate using that node's own model
-  const nodeCost = m.cost || estimateCost(node.model || '', inputT, outputT);
+  const modelId = node.model || '';
+  const nodeCost = m.cost || estimateCost(modelId, inputT, outputT);
 
-  const totals = {
-    input_tokens: inputT,
-    output_tokens: outputT,
-    total_tokens: totalT,
-    cost_usd: nodeCost,
-  };
+  // Accumulate per-model breakdown
+  if (modelId && (inputT || outputT)) {
+    if (!_byModel[modelId]) _byModel[modelId] = { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+    _byModel[modelId].input_tokens += inputT;
+    _byModel[modelId].output_tokens += outputT;
+    _byModel[modelId].cost_usd += nodeCost;
+  }
+
+  const totals = { input_tokens: inputT, output_tokens: outputT, total_tokens: totalT, cost_usd: nodeCost, by_model: _byModel };
 
   for (const member of node.member_responses || []) {
-    const child = sumMetrics(member);
+    const child = sumMetrics(member, _byModel);
     totals.input_tokens += child.input_tokens;
     totals.output_tokens += child.output_tokens;
     totals.total_tokens += child.total_tokens;
