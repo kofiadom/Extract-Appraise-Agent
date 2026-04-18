@@ -65,6 +65,7 @@ from utils.export_excel import export_to_excel
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "zai.glm-5")
+APPRAISAL_MODEL_ID = os.getenv("APPRAISAL_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
 
 # ── PageIndex (Chat with Doc — self-hosted) ────────────────────────────────────
 # Uses the local pageindex/ package. Tree indexing runs via boto3 → Bedrock.
@@ -104,7 +105,7 @@ FS_PAPERS_DIR = Path("tmp/papers_fs")
 
 # ── FileSearch agents ─────────────────────────────────────────────────────────
 extraction_agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID)
-appraisal_agent = create_filesearch_appraisal_agent(DEFAULT_MODEL_ID)
+appraisal_agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID)
 
 # ── PageIndex chat agent (registered with AgentOS — uses /agents/pageindex-chat-agent/runs)
 chat_agent = create_chat_agent(get_pageindex_client, DEFAULT_MODEL_ID)

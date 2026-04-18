@@ -154,11 +154,17 @@ export function parseTeamContent(content) {
  */
 export function sumMetrics(node) {
   const m = node.metrics || {};
+  const inputT = m.input_tokens || 0;
+  const outputT = m.output_tokens || 0;
+  const totalT = m.total_tokens || inputT + outputT;
+  // Use reported cost; fall back to per-node estimate using that node's own model
+  const nodeCost = m.cost || estimateCost(node.model || '', inputT, outputT);
+
   const totals = {
-    input_tokens: m.input_tokens || 0,
-    output_tokens: m.output_tokens || 0,
-    total_tokens: m.total_tokens || 0,
-    cost_usd: m.cost || 0,
+    input_tokens: inputT,
+    output_tokens: outputT,
+    total_tokens: totalT,
+    cost_usd: nodeCost,
   };
 
   for (const member of node.member_responses || []) {

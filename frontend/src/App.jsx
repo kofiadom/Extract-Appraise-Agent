@@ -16,7 +16,6 @@ import {
   resetPipeline,
   parseTeamContent,
   sumMetrics,
-  estimateCost,
 } from './services/api.js';
 
 const DEFAULT_API_URL =
@@ -122,12 +121,7 @@ export default function App() {
       const content = raw?.content ?? (typeof raw === 'string' ? raw : null);
       const parsed = parseTeamContent(content);
 
-      // Compute metrics — fall back to pricing table if API doesn't return cost
       const m = sumMetrics(raw);
-      if (!m.cost_usd && m.total_tokens > 0) {
-        const modelId = raw?.model || '';
-        m.cost_usd = estimateCost(modelId, m.input_tokens, m.output_tokens);
-      }
       setMetrics(m);
 
       if (parsed) {
