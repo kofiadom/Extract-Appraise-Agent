@@ -46,7 +46,7 @@ from utils.llamaparse_helper import parse_pdf_to_markdown
 LLAMA_CLOUD_API_KEY = os.getenv("LLAMAPARSE_API_KEY", "")
 FS_MARKDOWN_DIR = Path("tmp/papers_fs_md")
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -64,6 +64,27 @@ from utils.export_appraisal_docx import export_appraisal_to_docx
 from utils.export_excel import export_to_excel
 
 logger = logging.getLogger(__name__)
+# Uvicorn leaves root at WARNING; give our logger its own handler so INFO shows.
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    logger.addHandler(_h)
+logger.setLevel(logging.INFO)
+
+
+class _TruncateFilter(logging.Filter):
+    """Truncate very long log messages (e.g. full markdown dumps from debug_mode)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if len(msg) > 300:
+            record.msg = msg[:300] + f"… [+{len(msg) - 300} chars]"
+            record.args = ()
+        return True
+
+
+logging.getLogger("agno").addFilter(_TruncateFilter())
+
 
 DEFAULT_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "zai.glm-5")
 APPRAISAL_MODEL_ID = os.getenv("APPRAISAL_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
@@ -134,6 +155,9 @@ _state: dict = {}
 # ── Async pipeline jobs ────────────────────────────────────────────────────────
 _pipeline_jobs: dict = {}
 
+# ── Async indexing jobs ────────────────────────────────────────────────────────
+_index_jobs: dict = {}
+
 
 def _serialize_run(node) -> dict:
     """Recursively serialize an Agno RunResponse into a plain JSON-safe dict."""
@@ -175,10 +199,44 @@ async def _run_pipeline_bg(job_id: str, message: str) -> None:
         response = await evidence_team.arun(message, stream=False)
         result = _serialize_run(response)
         _pipeline_jobs[job_id] = {"status": "done", "result": result}
-        logger.info("Pipeline job %s done (%d chars)", job_id, len(result.get("content", "")))
+
+        content = result.get("content", "")
+        logger.info("Pipeline job %s done (%d chars)", job_id, len(content))
+
+        # Log a snippet of each member agent's output for visibility
+        for member in result.get("member_responses", []):
+            agent_id = member.get("agent_id", "unknown")
+            member_content = member.get("content") or ""
+            snippet = member_content[:200].replace("\n", " ")
+            logger.info(
+                "  [%s] output: %s%s",
+                agent_id,
+                snippet,
+                f"… (+{len(member_content) - 200} chars)" if len(member_content) > 200 else "",
+            )
     except Exception as exc:
         logger.error("Pipeline job %s failed: %s", job_id, exc)
         _pipeline_jobs[job_id] = {"status": "error", "error": str(exc)}
+
+
+async def _run_index_bg(job_id: str, pdf_path: str) -> None:
+    try:
+        client = get_pageindex_client()
+        doc_id = await asyncio.to_thread(client.index, pdf_path)
+        doc_info = client.documents.get(doc_id, {})
+        _index_jobs[job_id] = {
+            "status": "done",
+            "result": {
+                "doc_id": doc_id,
+                "filename": doc_info.get("doc_name", Path(pdf_path).name),
+                "page_count": doc_info.get("page_count"),
+            },
+        }
+        logger.info("Index job %s done — doc_id=%s", job_id, doc_id)
+    except Exception as exc:
+        logger.error("Index job %s failed: %s", job_id, exc)
+        _index_jobs[job_id] = {"status": "error", "error": str(exc)}
+
 
 # ── Custom FastAPI app ────────────────────────────────────────────────────────
 ROOT_PATH = os.getenv("ROOT_PATH", "/extract-appraise/backend")
@@ -356,36 +414,30 @@ async def upload_for_filesearch(files: list[UploadFile]):
 # The chat QUERY is handled by AgentOS at POST /agents/pageindex-chat-agent/runs.
 # These three endpoints cover upload/index, listing, and removal only.
 
-@app.post("/chat/index", tags=["Chat"])
-async def chat_index_document(file: UploadFile):
-    """
-    Upload a PDF and index it with self-hosted PageIndex (LiteLLM → Bedrock).
-    Builds a hierarchical tree structure — expect 1-3 min for a typical paper.
-    Returns the doc_id to pass to POST /agents/pageindex-chat-agent/runs.
-    """
+@app.post("/chat/index-async", tags=["Chat"])
+async def chat_index_document_async(background_tasks: BackgroundTasks, file: UploadFile):
+    """Save PDF and start indexing in background. Returns job_id immediately."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
     PAGEINDEX_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     pdf_path = PAGEINDEX_PAPERS_DIR / file.filename
     pdf_path.write_bytes(await file.read())
-    logger.info("Saved PDF for PageIndex indexing: %s", pdf_path)
 
-    try:
-        client = get_pageindex_client()
-        # client.index() is CPU/IO-bound and can take minutes — run in thread pool
-        doc_id = await asyncio.to_thread(client.index, str(pdf_path))
-    except Exception as exc:
-        logger.error("PageIndex indexing failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Indexing failed: {exc}")
+    job_id = str(uuid.uuid4())
+    _index_jobs[job_id] = {"status": "running"}
+    background_tasks.add_task(_run_index_bg, job_id, str(pdf_path))
+    logger.info("Index job %s started for %s", job_id, file.filename)
+    return {"job_id": job_id}
 
-    doc_info = client.documents.get(doc_id, {})
-    return {
-        "doc_id": doc_id,
-        "filename": file.filename,
-        "status": "indexed",
-        "page_count": doc_info.get("page_count"),
-    }
+
+@app.get("/chat/index-job/{job_id}", tags=["Chat"])
+async def chat_index_job_status(job_id: str):
+    """Poll indexing job status. Returns status + result when done."""
+    job = _index_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
 
 
 @app.get("/chat/documents", tags=["Chat"])

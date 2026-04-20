@@ -6,7 +6,13 @@ This agent reads the pre-converted .md files using FileTools and performs
 REST quality appraisal — no Docling, no vector database required.
 """
 
+import os
 from pathlib import Path
+from typing import Any, Dict
+
+import aioboto3
+import boto3
+from botocore.config import Config
 
 from agno.agent import Agent
 from agno.models.aws import AwsBedrock
@@ -110,6 +116,51 @@ APPRAISAL_STANDALONE_PROMPT_FS = (
 # Factory function
 # ---------------------------------------------------------------------------
 
+_BEDROCK_CFG = Config(read_timeout=600, connect_timeout=60, retries={"max_attempts": 0})
+
+
+class _AwsBedrockLongTimeout(AwsBedrock):
+    """AwsBedrock with a 600-second read timeout for both sync and async clients."""
+
+    def get_client(self):
+        if not self.session and self.client is not None:
+            return self.client
+        self.aws_region = self.aws_region or os.getenv("AWS_REGION")
+        self.aws_access_key_id = self.aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
+        self.aws_secret_access_key = self.aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
+        self.aws_session_token = self.aws_session_token or os.getenv("AWS_SESSION_TOKEN") or None
+        self.client = boto3.client(
+            service_name="bedrock-runtime",
+            region_name=self.aws_region,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_session_token=self.aws_session_token,
+            config=_BEDROCK_CFG,
+        )
+        return self.client
+
+    def get_async_client(self):
+        if self.async_session is None:
+            self.aws_region = self.aws_region or os.getenv("AWS_REGION")
+            self.aws_access_key_id = self.aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
+            self.aws_secret_access_key = self.aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
+            self.aws_session_token = self.aws_session_token or os.getenv("AWS_SESSION_TOKEN") or None
+            self.async_session = aioboto3.Session()
+
+        client_kwargs: Dict[str, Any] = {
+            "service_name": "bedrock-runtime",
+            "region_name": self.aws_region,
+            "config": _BEDROCK_CFG,
+        }
+        if self.aws_access_key_id and self.aws_secret_access_key:
+            client_kwargs["aws_access_key_id"] = self.aws_access_key_id
+            client_kwargs["aws_secret_access_key"] = self.aws_secret_access_key
+            if self.aws_session_token:
+                client_kwargs["aws_session_token"] = self.aws_session_token
+
+        return self.async_session.client(**client_kwargs)
+
+
 def create_filesearch_appraisal_agent(model_id: str = "zai.glm-5") -> Agent:
     """
     Create a FileSearch appraisal agent that reads pre-converted markdown files.
@@ -129,7 +180,7 @@ def create_filesearch_appraisal_agent(model_id: str = "zai.glm-5") -> Agent:
         id="fs-appraisal-agent",
         name="FileSearch Appraisal Agent",
         role="Read pre-converted markdown papers and perform REST quality appraisal using 20 methodological criteria",
-        model=AwsBedrock(id=model_id),
+        model=_AwsBedrockLongTimeout(id=model_id, max_tokens=32000),
         tools=[
             FileTools(
                 base_dir=FS_MARKDOWN_DIR,

@@ -214,19 +214,29 @@ export { PRICING };
 // ── Chat with Doc (PageIndex) ──────────────────────────────────────────────
 
 /**
- * Upload a PDF and index it with PageIndex.
+ * Start async indexing of a PDF. Returns job_id immediately.
  * @param {string} baseURL
  * @param {File} file
- * @returns {Promise<{ doc_id: string, filename: string, page_count: number|null }>}
+ * @returns {Promise<string>} job_id
  */
-export async function indexDocument(baseURL, file) {
+export async function startIndexJob(baseURL, file) {
   const client = createApiClient(baseURL);
   const fd = new FormData();
   fd.append('file', file);
-  const res = await client.post('/chat/index', fd, {
+  const res = await client.post('/chat/index-async', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 180_000, // indexing can take up to ~90 s
   });
+  return res.data.job_id;
+}
+
+/**
+ * Poll an indexing job. Returns { status, result?, error? }.
+ * @param {string} baseURL
+ * @param {string} jobId
+ */
+export async function pollIndexJob(baseURL, jobId) {
+  const client = createApiClient(baseURL);
+  const res = await client.get(`/chat/index-job/${jobId}`);
   return res.data;
 }
 

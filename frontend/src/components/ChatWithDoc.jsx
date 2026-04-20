@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { indexDocument, listChatDocuments, deleteChatDocument, chatQueryStream } from '../services/api.js';
+import { startIndexJob, pollIndexJob, listChatDocuments, deleteChatDocument, chatQueryStream } from '../services/api.js';
 
 // Markdown component overrides — styled for the chat bubble context
 const MD_COMPONENTS = {
@@ -113,7 +113,7 @@ export default function ChatWithDoc({ apiUrl }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── upload & index a PDF ────────────────────────────────────────────────────
+  // ── upload & index a PDF (async + polling) ─────────────────────────────────
   async function handleFileSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -122,9 +122,28 @@ export default function ChatWithDoc({ apiUrl }) {
     setIndexing(true);
     setIndexError('');
     try {
-      const result = await indexDocument(apiUrl, file);
+      const jobId = await startIndexJob(apiUrl, file);
+
+      // Poll every 6 s until done or error
+      const result = await new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const job = await pollIndexJob(apiUrl, jobId);
+            if (job.status === 'done') {
+              clearInterval(interval);
+              resolve(job.result);
+            } else if (job.status === 'error') {
+              clearInterval(interval);
+              reject(new Error(job.error || 'Indexing failed'));
+            }
+          } catch (err) {
+            clearInterval(interval);
+            reject(err);
+          }
+        }, 6000);
+      });
+
       await loadDocuments();
-      // Auto-select the newly indexed doc
       sessionIdRef.current = crypto.randomUUID();
       setSelectedDoc({
         doc_id: result.doc_id,
@@ -140,7 +159,7 @@ export default function ChatWithDoc({ apiUrl }) {
       const detail =
         err?.response?.data?.detail ||
         err?.message ||
-        'Indexing failed. Check that OPENAI_API_KEY is set in your .env file.';
+        'Indexing failed.';
       setIndexError(detail);
     } finally {
       setIndexing(false);

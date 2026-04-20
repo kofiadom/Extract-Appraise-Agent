@@ -106,7 +106,7 @@ def create_filesearch_extraction_agent(model_id: str = "zai.glm-5") -> Agent:
         id="fs-extraction-agent",
         name="FileSearch Extraction Agent",
         role="Read pre-converted markdown papers and extract structured evidence",
-        model=AwsBedrock(id=model_id),
+        model=AwsBedrock(id=model_id, max_tokens=32000),
         tools=[
             FileTools(
                 base_dir=FS_MARKDOWN_DIR,
