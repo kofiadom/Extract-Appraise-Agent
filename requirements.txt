@@ -10,3 +10,4 @@ anthropic
 litellm
 PyPDF2
 pymupdf
+psycopg[binary]
