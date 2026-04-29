@@ -14,10 +14,13 @@ venv/
 
 # ── Project runtime & outputs ─────────────────────────────────────────────────
 tmp/
-papers/
+/papers/
 *.xlsx
 *.docx
-*.json
+
+# ── Backend (NestJS) ──────────────────────────────────────────────────────────
+backend/node_modules/
+backend/dist/
 
 # ── Node / Frontend ───────────────────────────────────────────────────────────
 frontend/node_modules/
