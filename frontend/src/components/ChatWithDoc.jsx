@@ -7,7 +7,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { startIndexJob, pollIndexJob, listChatDocuments, deleteChatDocument, chatQueryStream } from '../services/api.js';
 
-// Markdown component overrides — styled for the chat bubble context
 const MD_COMPONENTS = {
   p:          ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
   h1:         ({ children }) => <p className="font-bold text-base mb-1">{children}</p>,
@@ -30,20 +29,16 @@ const MD_COMPONENTS = {
   td:         ({ children }) => <td className="border border-current/20 px-2 py-1">{children}</td>,
 };
 
-// Renders a single chat message bubble
 function MessageBubble({ msg }) {
   const isUser = msg.role === 'user';
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar */}
       <div
         className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold
           ${isUser ? 'bg-[#1B2A4A]' : 'bg-emerald-600'}`}
       >
         {isUser ? <User size={14} /> : <Bot size={14} />}
       </div>
-
-      {/* Bubble + tool status */}
       <div className="flex flex-col gap-1.5 max-w-[78%]">
         {msg.toolStatus && (
           <div className="flex items-center gap-1.5 text-xs text-emerald-600">
@@ -76,44 +71,35 @@ function MessageBubble({ msg }) {
   );
 }
 
-export default function ChatWithDoc({ apiUrl }) {
-  // ── document state ──────────────────────────────────────────────────────────
+export default function ChatWithDoc() {
   const [documents, setDocuments] = useState([]);
-  const [selectedDoc, setSelectedDoc] = useState(null); // { doc_id, doc_name, page_count }
+  const [selectedDoc, setSelectedDoc] = useState(null);
   const [docDropdownOpen, setDocDropdownOpen] = useState(false);
-
-  // ── upload/index state ──────────────────────────────────────────────────────
   const [indexing, setIndexing] = useState(false);
   const [indexError, setIndexError] = useState('');
   const fileInputRef = useRef(null);
-
-  // ── chat state ──────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-  // Each selected document gets its own session ID so Agno keeps separate histories
   const sessionIdRef = useRef(null);
 
-  // ── load documents on mount ─────────────────────────────────────────────────
   const loadDocuments = useCallback(async () => {
     try {
-      const data = await listChatDocuments(apiUrl);
-      setDocuments(data.documents || []);
+      const docs = await listChatDocuments();
+      setDocuments(docs || []);
     } catch {
       // Silently ignore — PageIndex may not be installed yet
     }
-  }, [apiUrl]);
+  }, []);
 
   useEffect(() => { loadDocuments(); }, [loadDocuments]);
 
-  // ── auto-scroll chat ────────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── upload & index a PDF (async + polling) ─────────────────────────────────
   async function handleFileSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -122,17 +108,16 @@ export default function ChatWithDoc({ apiUrl }) {
     setIndexing(true);
     setIndexError('');
     try {
-      const jobId = await startIndexJob(apiUrl, file);
+      const jobId = await startIndexJob(file);
 
-      // Poll every 6 s until done or error
       const result = await new Promise((resolve, reject) => {
         const interval = setInterval(async () => {
           try {
-            const job = await pollIndexJob(apiUrl, jobId);
-            if (job.status === 'done') {
+            const job = await pollIndexJob(jobId);
+            if (job.status === 'completed') {
               clearInterval(interval);
               resolve(job.result);
-            } else if (job.status === 'error') {
+            } else if (job.status === 'failed') {
               clearInterval(interval);
               reject(new Error(job.error || 'Indexing failed'));
             }
@@ -147,26 +132,22 @@ export default function ChatWithDoc({ apiUrl }) {
       sessionIdRef.current = crypto.randomUUID();
       setSelectedDoc({
         doc_id: result.doc_id,
-        doc_name: result.filename,
+        doc_name: result.filename ?? result.doc_name ?? file.name,
         page_count: result.page_count,
       });
       setMessages([{
         id: Date.now(),
         role: 'assistant',
-        content: `Document **${result.filename}** indexed successfully (${result.page_count ?? '?'} pages). Ask me anything about it!`,
+        content: `Document **${result.filename ?? result.doc_name ?? file.name}** indexed successfully (${result.page_count ?? '?'} pages). Ask me anything about it!`,
       }]);
     } catch (err) {
-      const detail =
-        err?.response?.data?.detail ||
-        err?.message ||
-        'Indexing failed.';
+      const detail = err?.response?.data?.detail || err?.message || 'Indexing failed.';
       setIndexError(detail);
     } finally {
       setIndexing(false);
     }
   }
 
-  // ── select a document from the dropdown ────────────────────────────────────
   function handleSelectDoc(doc) {
     sessionIdRef.current = crypto.randomUUID();
     setSelectedDoc(doc);
@@ -178,11 +159,10 @@ export default function ChatWithDoc({ apiUrl }) {
     }]);
   }
 
-  // ── remove a document ───────────────────────────────────────────────────────
   async function handleRemoveDoc(doc_id, e) {
     e.stopPropagation();
     try {
-      await deleteChatDocument(apiUrl, doc_id);
+      await deleteChatDocument(doc_id);
       await loadDocuments();
       if (selectedDoc?.doc_id === doc_id) {
         setSelectedDoc(null);
@@ -193,7 +173,6 @@ export default function ChatWithDoc({ apiUrl }) {
     }
   }
 
-  // ── send a chat message ─────────────────────────────────────────────────────
   async function handleSend() {
     const text = input.trim();
     if (!text || !selectedDoc || sending) return;
@@ -207,32 +186,20 @@ export default function ChatWithDoc({ apiUrl }) {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
-    chatQueryStream(apiUrl, selectedDoc.doc_id, text, sessionIdRef.current, {
+    chatQueryStream(selectedDoc.doc_id, text, sessionIdRef.current, {
       onChunk(chunk) {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: m.content + chunk }
-              : m
-          )
+          prev.map((m) => m.id === assistantId ? { ...m, content: m.content + chunk } : m)
         );
       },
       onToolCall(toolName) {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, toolStatus: `Calling ${toolName}…` }
-              : m
-          )
+          prev.map((m) => m.id === assistantId ? { ...m, toolStatus: `Calling ${toolName}…` } : m)
         );
       },
       onDone() {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, isStreaming: false, toolStatus: null }
-              : m
-          )
+          prev.map((m) => m.id === assistantId ? { ...m, isStreaming: false, toolStatus: null } : m)
         );
         setSending(false);
         inputRef.current?.focus();
@@ -259,13 +226,11 @@ export default function ChatWithDoc({ apiUrl }) {
     }
   }
 
-  // ── render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full" style={{ minHeight: 'calc(100vh - 160px)' }}>
 
-      {/* ── Document selector bar ────────────────────────────────────────── */}
+      {/* Document selector bar */}
       <div className="card p-4 mb-5 flex items-center gap-3 flex-wrap">
-        {/* Dropdown */}
         <div className="relative flex-1 min-w-[220px]">
           <button
             onClick={() => setDocDropdownOpen((v) => !v)}
@@ -315,7 +280,6 @@ export default function ChatWithDoc({ apiUrl }) {
           )}
         </div>
 
-        {/* Upload button */}
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={indexing}
@@ -336,7 +300,6 @@ export default function ChatWithDoc({ apiUrl }) {
           onChange={handleFileSelect}
         />
 
-        {/* Clear chat */}
         {messages.length > 0 && (
           <button
             onClick={() => {
@@ -351,7 +314,6 @@ export default function ChatWithDoc({ apiUrl }) {
         )}
       </div>
 
-      {/* ── Indexing error ───────────────────────────────────────────────── */}
       {indexError && (
         <div className="mb-4 flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-200">
           <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
@@ -365,7 +327,6 @@ export default function ChatWithDoc({ apiUrl }) {
         </div>
       )}
 
-      {/* ── Indexing progress banner ─────────────────────────────────────── */}
       {indexing && (
         <div className="mb-4 flex items-center gap-3 p-4 rounded-xl bg-blue-50 border border-blue-100">
           <Loader2 size={16} className="text-blue-500 animate-spin flex-shrink-0" />
@@ -378,7 +339,6 @@ export default function ChatWithDoc({ apiUrl }) {
         </div>
       )}
 
-      {/* ── Empty state (no doc selected) ───────────────────────────────── */}
       {!selectedDoc && !indexing && (
         <div className="flex-1 flex flex-col items-center justify-center text-center py-16 card">
           <div className="w-16 h-16 rounded-2xl bg-[#1B2A4A]/5 flex items-center justify-center mb-4">
@@ -388,19 +348,14 @@ export default function ChatWithDoc({ apiUrl }) {
           <p className="text-gray-400 text-sm max-w-xs">
             Upload a PDF to index it with PageIndex, or select an already-indexed document above.
           </p>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="btn-primary mt-5"
-          >
+          <button onClick={() => fileInputRef.current?.click()} className="btn-primary mt-5">
             <UploadCloud size={15} /> Upload & Index PDF
           </button>
         </div>
       )}
 
-      {/* ── Chat area ───────────────────────────────────────────────────── */}
       {selectedDoc && (
         <div className="flex flex-col flex-1 card overflow-hidden">
-          {/* Messages scroll area */}
           <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4" style={{ minHeight: 320, maxHeight: 520 }}>
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-center py-8">
@@ -419,10 +374,8 @@ export default function ChatWithDoc({ apiUrl }) {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Divider */}
           <div className="border-t border-gray-100" />
 
-          {/* Input row */}
           <div className="px-4 py-3 flex items-end gap-3">
             <textarea
               ref={inputRef}
@@ -445,10 +398,7 @@ export default function ChatWithDoc({ apiUrl }) {
               className="flex-shrink-0 w-10 h-10 rounded-xl bg-[#1B2A4A] text-white flex items-center justify-center hover:bg-[#152038] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               title="Send (Enter)"
             >
-              {sending
-                ? <Loader2 size={16} className="animate-spin" />
-                : <Send size={16} />
-              }
+              {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </button>
           </div>
         </div>

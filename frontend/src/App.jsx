@@ -9,22 +9,17 @@ import AppraisalTab from './components/AppraisalTab.jsx';
 import DownloadTab from './components/DownloadTab.jsx';
 import PdfViewer from './components/PdfViewer.jsx';
 import ChatWithDoc from './components/ChatWithDoc.jsx';
+import AuthScreen from './components/AuthScreen.jsx';
 import {
+  getToken,
+  clearToken,
   uploadFiles,
   startPipelineJob,
   pollPipelineJob,
-  storeResults,
-  resetPipeline,
+  getPipelineResult,
   parseTeamContent,
   sumMetrics,
 } from './services/api.js';
-
-const DEFAULT_API_URL =
-  typeof import.meta !== 'undefined' && import.meta.env.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL
-    : import.meta.env.DEV
-      ? 'http://localhost:7777'
-      : window.location.pathname.replace(/\/frontend\/?.*$/, '/backend');
 
 const TABS = [
   { id: 'evidence', label: 'Evidence', icon: BookOpen },
@@ -38,19 +33,20 @@ const APP_MODES = [
 ];
 
 export default function App() {
-  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
-  const [appMode, setAppMode] = useState('extractor'); // 'extractor' | 'chat'
+  const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
+  const [appMode, setAppMode] = useState('extractor');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [phase, setPhase] = useState('idle'); // idle | uploading | uploaded | running | done | error
+  const [phase, setPhase] = useState('idle');
   const [files, setFiles] = useState([]);
   const [markdownFiles, setMarkdownFiles] = useState([]);
-  const [results, setResults] = useState(null); // parsed pipeline data
+  const [currentJobId, setCurrentJobId] = useState(null);
+  const [results, setResults] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [activeTab, setActiveTab] = useState('evidence');
   const [showPdf, setShowPdf] = useState(false);
-  const [pdfWidthPct, setPdfWidthPct] = useState(45); // % of main area
+  const [pdfWidthPct, setPdfWidthPct] = useState(45);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartPct = useRef(45);
@@ -88,25 +84,42 @@ export default function App() {
     };
   }, []);
 
+  const handleLogin = useCallback((token) => {
+    setIsAuthenticated(!!token);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    clearToken();
+    setIsAuthenticated(false);
+    setPhase('idle');
+    setFiles([]);
+    setMarkdownFiles([]);
+    setResults(null);
+    setMetrics(null);
+    setElapsedMs(null);
+    setErrorMsg('');
+    setCurrentJobId(null);
+  }, []);
+
   // --- Upload phase ---
   const handleUpload = useCallback(async () => {
     if (!files.length) return;
     setPhase('uploading');
     setErrorMsg('');
     try {
-      const data = await uploadFiles(apiUrl, files);
-      setMarkdownFiles(data.markdown_files || []);
+      const data = await uploadFiles(files);
+      setMarkdownFiles(data.markdownFiles || data.markdown_files || []);
       setPhase('uploaded');
     } catch (err) {
       const msg =
         err?.response?.data?.detail ||
         err?.response?.data?.message ||
         err.message ||
-        'Upload failed. Please check the API URL and try again.';
+        'Upload failed. Please try again.';
       setErrorMsg(msg);
       setPhase('error');
     }
-  }, [apiUrl, files]);
+  }, [files]);
 
   // --- Pipeline run phase ---
   const handleRun = useCallback(async () => {
@@ -114,16 +127,19 @@ export default function App() {
     setErrorMsg('');
     const startTs = Date.now();
     try {
-      // Start the job — returns immediately, no Cloudflare timeout risk
-      const jobId = await startPipelineJob(apiUrl, markdownFiles);
+      const jobId = await startPipelineJob(markdownFiles);
+      setCurrentJobId(jobId);
 
-      // Poll every 6 s until done or error
+      // Poll every 6 s until completed or failed
       let raw;
       while (true) {
         await new Promise((r) => setTimeout(r, 6_000));
-        const job = await pollPipelineJob(apiUrl, jobId);
-        if (job.status === 'done') { raw = job.result; break; }
-        if (job.status === 'error') throw new Error(job.error || 'Pipeline failed');
+        const job = await pollPipelineJob(jobId);
+        if (job.status === 'completed') {
+          raw = await getPipelineResult(jobId);
+          break;
+        }
+        if (job.status === 'failed') throw new Error(job.error || 'Pipeline failed');
       }
 
       setElapsedMs(Date.now() - startTs);
@@ -134,15 +150,12 @@ export default function App() {
 
       if (parsed) {
         setResults(parsed);
-        try { await storeResults(apiUrl, parsed); } catch { /* non-fatal */ }
         setPhase('done');
         setActiveTab('evidence');
       } else {
         setResults({ papers: [], appraisal: { appraisals: [] }, _raw: content });
         setPhase('done');
-        setErrorMsg(
-          'Pipeline completed but the response could not be parsed into structured data.'
-        );
+        setErrorMsg('Pipeline completed but the response could not be parsed into structured data.');
       }
     } catch (err) {
       setElapsedMs(Date.now() - startTs);
@@ -154,15 +167,10 @@ export default function App() {
       setErrorMsg(msg);
       setPhase('error');
     }
-  }, [apiUrl, markdownFiles]);
+  }, [markdownFiles]);
 
-  // --- Reset ---
-  const handleReset = useCallback(async () => {
-    try {
-      await resetPipeline(apiUrl);
-    } catch {
-      // Ignore backend errors during reset
-    }
+  // --- Reset (local state only — no API call needed) ---
+  const handleReset = useCallback(() => {
     setPhase('idle');
     setFiles([]);
     setMarkdownFiles([]);
@@ -171,35 +179,34 @@ export default function App() {
     setElapsedMs(null);
     setErrorMsg('');
     setActiveTab('evidence');
-  }, [apiUrl]);
+    setCurrentJobId(null);
+  }, []);
+
+  if (!isAuthenticated) {
+    return <AuthScreen onLogin={handleLogin} />;
+  }
 
   const papers = results?.papers ?? [];
-  const appraisals =
-    results?.appraisal?.appraisals ||
-    results?.appraisals ||
-    [];
+  const appraisals = results?.appraisal?.appraisals || results?.appraisals || [];
 
   return (
     <div className="flex min-h-screen" style={{ background: '#F8FAFC' }}>
-      {/* Sidebar */}
       <Sidebar
-        apiUrl={apiUrl}
-        onApiUrlChange={setApiUrl}
         onReset={handleReset}
+        onLogout={handleLogout}
         phase={phase}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((v) => !v)}
       />
 
-      {/* Main content */}
       <main
         ref={mainRef}
         className={`flex-1 transition-all duration-200 ${showPdf && phase === 'done' ? 'flex overflow-hidden h-screen' : 'min-h-screen'}`}
         style={{ marginLeft: sidebarOpen ? 260 : 48 }}
       >
-        {/* Results + scrollable content */}
         <div className={`${showPdf && phase === 'done' ? 'flex-1 overflow-y-auto' : ''}`}>
         <div className={showPdf && phase === 'done' ? 'px-6 py-8' : 'max-w-5xl mx-auto px-8 py-10'}>
+
           {/* Page header + mode switcher */}
           <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
             <div>
@@ -213,7 +220,6 @@ export default function App() {
               </p>
             </div>
 
-            {/* Mode toggle */}
             <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-gray-100 shadow-card flex-shrink-0">
               {APP_MODES.map(({ id, label, icon: Icon }) => (
                 <button
@@ -233,15 +239,13 @@ export default function App() {
           </div>
 
           {/* ── Chat with Doc mode ── */}
-          {appMode === 'chat' && <ChatWithDoc apiUrl={apiUrl} />}
+          {appMode === 'chat' && <ChatWithDoc />}
 
           {/* ── Evidence Extractor mode ── */}
           {appMode === 'extractor' && <>
 
-          {/* Step indicator */}
           <StepIndicator phase={phase} />
 
-          {/* Error banner (non-blocking) */}
           {errorMsg && phase !== 'error' && (
             <div className="mb-6 flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200">
               <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -252,7 +256,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Error state (blocking) */}
           {phase === 'error' && (
             <div className="mb-6">
               <div className="rounded-xl bg-red-50 border border-red-200 p-5">
@@ -284,12 +287,9 @@ export default function App() {
             </div>
           )}
 
-          {/* Upload section — shown in all phases except done */}
           {phase !== 'done' && (
             <div className="card p-6 mb-6">
-              <h2 className="text-sm font-semibold text-gray-700 mb-4">
-                Upload Research Papers
-              </h2>
+              <h2 className="text-sm font-semibold text-gray-700 mb-4">Upload Research Papers</h2>
               <UploadZone
                 files={files}
                 onFilesChange={setFiles}
@@ -300,10 +300,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Done state — metrics + results tabs */}
           {phase === 'done' && (
             <>
-              {/* Metrics bar */}
               <MetricsBar
                 metrics={metrics}
                 papersCount={papers.length}
@@ -311,7 +309,6 @@ export default function App() {
                 elapsedMs={elapsedMs}
               />
 
-              {/* Tab bar + PDF toggle */}
               <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-gray-100 shadow-card inline-flex">
                   {TABS.map(({ id, label, icon: Icon }) => (
@@ -340,7 +337,6 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* PDF viewer toggle — only shown when files are available */}
                 {files.length > 0 && (
                   <button
                     onClick={() => setShowPdf((v) => !v)}
@@ -356,37 +352,31 @@ export default function App() {
                 )}
               </div>
 
-              {/* Tab content */}
               <div>
                 {activeTab === 'evidence' && <EvidenceTab papers={papers} />}
                 {activeTab === 'appraisal' && <AppraisalTab appraisals={appraisals} />}
-                {activeTab === 'downloads' && <DownloadTab apiUrl={apiUrl} />}
+                {activeTab === 'downloads' && <DownloadTab jobId={currentJobId} />}
               </div>
             </>
           )}
-          </>}{/* end appMode === 'extractor' */}
-        </div>{/* inner content wrapper */}
-        </div>{/* outer scroll wrapper */}
+          </>}
+        </div>
+        </div>
 
-        {/* Drag divider + PDF viewer panel */}
         {showPdf && phase === 'done' && (
           <>
-            {/* Drag handle */}
             <div
               onMouseDown={handleDividerMouseDown}
               className="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-[#1B2A4A]/20 active:bg-[#1B2A4A]/40 transition-colors relative group"
               style={{ background: '#E2E8F0' }}
               title="Drag to resize"
             >
-              {/* Grip dots */}
               <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 {[0,1,2].map(i => (
                   <span key={i} className="w-1 h-1 rounded-full bg-gray-400" />
                 ))}
               </div>
             </div>
-
-            {/* PDF panel */}
             <div className="flex-shrink-0 sticky top-0 h-screen" style={{ width: `${pdfWidthPct}%` }}>
               <PdfViewer files={files} onClose={() => setShowPdf(false)} />
             </div>

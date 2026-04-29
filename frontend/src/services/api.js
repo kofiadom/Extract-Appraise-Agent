@@ -1,5 +1,9 @@
 import axios from 'axios';
 
+// ── Config ────────────────────────────────────────────────────────────────────
+
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+
 const PRICING = {
   'zai.glm-5': { input: 1.00, output: 3.20 },
   'moonshotai.kimi-k2.5': { input: 0.14, output: 0.59 },
@@ -7,92 +11,89 @@ const PRICING = {
   'minimax.minimax-m2.5': { input: 0.40, output: 1.20 },
 };
 
-export function createApiClient(baseURL) {
-  return axios.create({ baseURL });
+// ── Token management ──────────────────────────────────────────────────────────
+
+export function getToken() {
+  return localStorage.getItem('auth_token');
 }
 
-/**
- * Upload PDF files to the backend.
- * @param {string} baseURL
- * @param {File[]} files
- * @returns {Promise<{ files: string[], markdown_files: string[] }>}
- */
-export async function uploadFiles(baseURL, files) {
-  const client = createApiClient(baseURL);
+export function setToken(token) {
+  localStorage.setItem('auth_token', token);
+}
+
+export function clearToken() {
+  localStorage.removeItem('auth_token');
+}
+
+// ── Axios instance with auth interceptors ─────────────────────────────────────
+
+const api = axios.create({ baseURL: BASE_URL });
+
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      clearToken();
+      window.location.reload();
+    }
+    return Promise.reject(err);
+  },
+);
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export async function login(email, password) {
+  const { data } = await api.post('/api/v1/auth/login', { email, password });
+  return data; // { access_token, ... }
+}
+
+export async function register(email, password) {
+  const { data } = await api.post('/api/v1/auth/register', { email, password });
+  return data; // { access_token, ... }
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
+
+export async function uploadFiles(files) {
   const fd = new FormData();
   files.forEach((f) => fd.append('files', f));
-  const res = await client.post('/upload-fs', fd, {
+  const { data } = await api.post('/api/v1/papers/upload', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
-  return res.data;
+  return data.data; // { files, markdownFiles }
 }
 
-/**
- * Run the evidence extraction + appraisal pipeline.
- * @param {string} baseURL
- * @param {string[]} markdownFiles - array of markdown filenames from upload response
- * @returns {Promise<{ raw: object, parsed: object|null }>}
- */
-export async function runPipeline(baseURL, markdownFiles) {
-  const client = createApiClient(baseURL);
-  const message =
-    `Files: ${markdownFiles.join(', ')}\n\nExtract structured evidence from ALL provided markdown files, then perform REST quality appraisal on each paper.`;
-
-  const fd = new FormData();
-  fd.append('message', message);
-  fd.append('stream', 'false');
-  fd.append('monitor', 'false');
-
-  const res = await client.post('/teams/fs-evidence-team/runs', fd);
-  return res.data;
+export async function startPipelineJob(markdownFiles) {
+  const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles });
+  return data.data.jobId;
 }
 
-export async function startPipelineJob(baseURL, markdownFiles) {
-  const client = createApiClient(baseURL);
-  const res = await client.post('/pipeline/run-async', { markdown_files: markdownFiles });
-  return res.data.job_id;
+export async function pollPipelineJob(jobId) {
+  const { data } = await api.get(`/api/v1/pipeline/${jobId}`);
+  return data.data; // { jobId, status, progress, error? }
 }
 
-export async function pollPipelineJob(baseURL, jobId) {
-  const client = createApiClient(baseURL);
-  const res = await client.get(`/pipeline/job/${jobId}`);
-  return res.data;
+export async function getPipelineResult(jobId) {
+  const { data } = await api.get(`/api/v1/pipeline/${jobId}/result`);
+  return data.data; // { content, metrics, member_responses, ... }
 }
 
-/**
- * Store pipeline results in the backend so downloads work.
- * @param {string} baseURL
- * @param {object} parsed - parsed evidence + appraisal data
- */
-export async function storeResults(baseURL, parsed) {
-  const client = createApiClient(baseURL);
-  const body = {
-    papers: parsed.papers || [],
-    appraisal: parsed.appraisal || { appraisals: [] },
-  };
-  const res = await client.post('/pipeline/store', body);
-  return res.data;
-}
-
-/**
- * Download a file from the backend.
- * @param {string} baseURL
- * @param {'excel'|'docx'|'json'} type
- */
-export async function downloadFile(baseURL, type) {
-  const client = createApiClient(baseURL);
-  const endpointMap = {
-    excel: '/pipeline/download/excel',
-    docx: '/pipeline/download/docx',
-    json: '/pipeline/download/json',
-  };
+export async function downloadFile(type, jobId) {
+  const res = await api.get(`/api/v1/exports/${type}`, {
+    params: { jobId },
+    responseType: 'blob',
+  });
   const filenameMap = {
     excel: 'evidence_table.xlsx',
     docx: 'quality_appraisal.docx',
     json: 'full_data.json',
   };
-
-  const res = await client.get(endpointMap[type], { responseType: 'blob' });
   const url = URL.createObjectURL(res.data);
   const a = document.createElement('a');
   a.href = url;
@@ -103,223 +104,74 @@ export async function downloadFile(baseURL, type) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Reset the pipeline state on the backend.
- * @param {string} baseURL
- */
-export async function resetPipeline(baseURL) {
-  const client = createApiClient(baseURL);
-  const res = await client.delete('/pipeline/reset');
-  return res.data;
-}
+// ── Chat with Doc ─────────────────────────────────────────────────────────────
 
-/**
- * Parse the team run content field into structured data.
- * @param {string} content
- * @returns {object|null}
- */
-export function parseTeamContent(content) {
-  if (!content) return null;
-
-  const attempts = [
-    content,
-    content.replace(/^```(?:json)?\s*|\s*```$/gm, '').trim(),
-  ];
-
-  for (const c of attempts) {
-    try {
-      const d = JSON.parse(c.trim());
-      if (d?.papers) return d;
-    } catch {
-      // ignore
-    }
-  }
-
-  const start = content.indexOf('{');
-  if (start !== -1) {
-    let depth = 0;
-    for (let i = start; i < content.length; i++) {
-      if (content[i] === '{') {
-        depth++;
-      } else if (content[i] === '}') {
-        depth--;
-        if (depth === 0) {
-          try {
-            const d = JSON.parse(content.slice(start, i + 1));
-            if (d?.papers) return d;
-          } catch {
-            // ignore
-          }
-          break;
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Recursively sum token usage and cost from nested agent response tree.
- * @param {object} node
- * @returns {{ input_tokens: number, output_tokens: number, total_tokens: number, cost_usd: number }}
- */
-export function sumMetrics(node, _byModel = {}) {
-  const m = node.metrics || {};
-  const inputT = m.input_tokens || 0;
-  const outputT = m.output_tokens || 0;
-  const totalT = m.total_tokens || inputT + outputT;
-  const modelId = node.model || '';
-  const nodeCost = m.cost || estimateCost(modelId, inputT, outputT);
-
-  // Accumulate per-model breakdown
-  if (modelId && (inputT || outputT)) {
-    if (!_byModel[modelId]) _byModel[modelId] = { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
-    _byModel[modelId].input_tokens += inputT;
-    _byModel[modelId].output_tokens += outputT;
-    _byModel[modelId].cost_usd += nodeCost;
-  }
-
-  const totals = { input_tokens: inputT, output_tokens: outputT, total_tokens: totalT, cost_usd: nodeCost, by_model: _byModel };
-
-  for (const member of node.member_responses || []) {
-    const child = sumMetrics(member, _byModel);
-    totals.input_tokens += child.input_tokens;
-    totals.output_tokens += child.output_tokens;
-    totals.total_tokens += child.total_tokens;
-    totals.cost_usd += child.cost_usd;
-  }
-
-  return totals;
-}
-
-/**
- * Estimate cost from token counts if the API doesn't return cost directly.
- * @param {string} modelId
- * @param {number} inputTokens
- * @param {number} outputTokens
- * @returns {number}
- */
-export function estimateCost(modelId, inputTokens, outputTokens) {
-  const modelKey = Object.keys(PRICING).find((k) =>
-    modelId?.toLowerCase().includes(k.toLowerCase())
-  );
-  if (!modelKey) return 0;
-  const { input, output } = PRICING[modelKey];
-  return (inputTokens / 1_000_000) * input + (outputTokens / 1_000_000) * output;
-}
-
-export { PRICING };
-
-// ── Chat with Doc (PageIndex) ──────────────────────────────────────────────
-
-/**
- * Start async indexing of a PDF. Returns job_id immediately.
- * @param {string} baseURL
- * @param {File} file
- * @returns {Promise<string>} job_id
- */
-export async function startIndexJob(baseURL, file) {
-  const client = createApiClient(baseURL);
+export async function startIndexJob(file) {
   const fd = new FormData();
   fd.append('file', file);
-  const res = await client.post('/chat/index-async', fd, {
+  const { data } = await api.post('/api/v1/chat/index', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
-  return res.data.job_id;
+  return data.data.jobId;
+}
+
+export async function pollIndexJob(jobId) {
+  const { data } = await api.get(`/api/v1/chat/index/jobs/${jobId}`);
+  return data.data; // { jobId, status, progress, result?, error? }
+}
+
+export async function listChatDocuments() {
+  const { data } = await api.get('/api/v1/chat/documents');
+  const docs = data.data || [];
+  // Map TypeORM entity camelCase → snake_case used by components
+  return docs.map((doc) => ({
+    doc_id: doc.docId,
+    doc_name: doc.fileName,
+    page_count: doc.pageCount,
+  }));
+}
+
+export async function deleteChatDocument(docId) {
+  await api.delete(`/api/v1/chat/documents/${docId}`);
 }
 
 /**
- * Poll an indexing job. Returns { status, result?, error? }.
- * @param {string} baseURL
- * @param {string} jobId
- */
-export async function pollIndexJob(baseURL, jobId) {
-  const client = createApiClient(baseURL);
-  const res = await client.get(`/chat/index-job/${jobId}`);
-  return res.data;
-}
-
-/**
- * List all documents indexed in the PageIndex workspace.
- * @param {string} baseURL
- * @returns {Promise<{ documents: Array<{ doc_id, doc_name, page_count }> }>}
- */
-export async function listChatDocuments(baseURL) {
-  const client = createApiClient(baseURL);
-  const res = await client.get('/chat/documents');
-  return res.data;
-}
-
-/**
- * Remove an indexed document from the PageIndex workspace.
- * @param {string} baseURL
- * @param {string} docId
- */
-export async function deleteChatDocument(baseURL, docId) {
-  const client = createApiClient(baseURL);
-  const res = await client.delete(`/chat/document/${docId}`);
-  return res.data;
-}
-
-/**
- * Ask a question about an indexed document via the AgentOS chat endpoint.
- * The message is formatted so the agent can extract the doc_id:
- *   DOC_ID: <docId>
- *   Question: <message>
- *
- * Returns the full answer string from the agent.
- *
- * @param {string} baseURL
- * @param {string} docId
- * @param {string} message
- * @param {Array<{role: string, content: string}>} history  — previous turns for context
- * @returns {Promise<string>}
- */
-export async function chatQuery(baseURL, docId, message, sessionId = null) {
-  const client = createApiClient(baseURL);
-
-  const fd = new FormData();
-  fd.append('message', `DOC_ID: ${docId}\nQuestion: ${message}`);
-  fd.append('stream', 'false');
-  fd.append('monitor', 'false');
-  if (sessionId) fd.append('session_id', sessionId);
-
-  const res = await client.post('/agents/pageindex-chat-agent/runs', fd, {
-    timeout: 120_000,
-  });
-
-  // AgentOS returns { content: "...", ... }
-  return res.data?.content ?? res.data?.message ?? JSON.stringify(res.data);
-}
-
-/**
- * Stream a chat query via AgentOS SSE.
- * Calls callbacks as events arrive:
+ * Stream a chat query via NestJS → FastAPI SSE proxy.
+ * Calls callbacks as SSE events arrive.
  *   onChunk(text)        — new content token(s)
  *   onToolCall(toolName) — agent invoked a tool
  *   onDone()             — stream finished
  *   onError(err)         — fatal error
  */
-export async function chatQueryStream(baseURL, docId, message, sessionId = null, callbacks = {}) {
+export async function chatQueryStream(docId, message, sessionId, callbacks = {}) {
   const { onChunk, onToolCall, onDone, onError } = callbacks;
-
-  const fd = new FormData();
-  fd.append('message', `DOC_ID: ${docId}\nQuestion: ${message}`);
-  fd.append('stream', 'true');
-  if (sessionId) fd.append('session_id', sessionId);
-
-  const url = baseURL.replace(/\/$/, '') + '/agents/pageindex-chat-agent/runs';
+  const token = getToken();
+  const url = BASE_URL.replace(/\/$/, '') + '/api/v1/chat/query/stream';
 
   let response;
   try {
-    response = await fetch(url, { method: 'POST', body: fd });
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        message: `DOC_ID: ${docId}\nQuestion: ${message}`,
+        sessionId,
+      }),
+    });
   } catch (err) {
     onError?.(err);
     return;
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearToken();
+      window.location.reload();
+      return;
+    }
     const text = await response.text().catch(() => `HTTP ${response.status}`);
     onError?.(new Error(text));
     return;
@@ -368,3 +220,85 @@ export async function chatQueryStream(baseURL, docId, message, sessionId = null,
 
   onDone?.();
 }
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+export function parseTeamContent(content) {
+  if (!content) return null;
+
+  const attempts = [
+    content,
+    content.replace(/^```(?:json)?\s*|\s*```$/gm, '').trim(),
+  ];
+
+  for (const c of attempts) {
+    try {
+      const d = JSON.parse(c.trim());
+      if (d?.papers) return d;
+    } catch {
+      // ignore
+    }
+  }
+
+  const start = content.indexOf('{');
+  if (start !== -1) {
+    let depth = 0;
+    for (let i = start; i < content.length; i++) {
+      if (content[i] === '{') {
+        depth++;
+      } else if (content[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          try {
+            const d = JSON.parse(content.slice(start, i + 1));
+            if (d?.papers) return d;
+          } catch {
+            // ignore
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+export function sumMetrics(node, _byModel = {}) {
+  const m = node.metrics || {};
+  const inputT = m.input_tokens || 0;
+  const outputT = m.output_tokens || 0;
+  const totalT = m.total_tokens || inputT + outputT;
+  const modelId = node.model || '';
+  const nodeCost = m.cost || estimateCost(modelId, inputT, outputT);
+
+  if (modelId && (inputT || outputT)) {
+    if (!_byModel[modelId]) _byModel[modelId] = { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+    _byModel[modelId].input_tokens += inputT;
+    _byModel[modelId].output_tokens += outputT;
+    _byModel[modelId].cost_usd += nodeCost;
+  }
+
+  const totals = { input_tokens: inputT, output_tokens: outputT, total_tokens: totalT, cost_usd: nodeCost, by_model: _byModel };
+
+  for (const member of node.member_responses || []) {
+    const child = sumMetrics(member, _byModel);
+    totals.input_tokens += child.input_tokens;
+    totals.output_tokens += child.output_tokens;
+    totals.total_tokens += child.total_tokens;
+    totals.cost_usd += child.cost_usd;
+  }
+
+  return totals;
+}
+
+export function estimateCost(modelId, inputTokens, outputTokens) {
+  const modelKey = Object.keys(PRICING).find((k) =>
+    modelId?.toLowerCase().includes(k.toLowerCase()),
+  );
+  if (!modelKey) return 0;
+  const { input, output } = PRICING[modelKey];
+  return (inputTokens / 1_000_000) * input + (outputTokens / 1_000_000) * output;
+}
+
+export { PRICING };

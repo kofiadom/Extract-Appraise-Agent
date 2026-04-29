@@ -87,7 +87,7 @@ EXTRACTION_PROMPT_FS = (
 # Factory function
 # ---------------------------------------------------------------------------
 
-def create_filesearch_extraction_agent(model_id: str = "zai.glm-5") -> Agent:
+def create_filesearch_extraction_agent(model_id: str = "zai.glm-5", db=None) -> Agent:
     """
     Create a FileSearch extraction agent that reads pre-converted markdown files.
 
@@ -97,6 +97,7 @@ def create_filesearch_extraction_agent(model_id: str = "zai.glm-5") -> Agent:
 
     Args:
         model_id: AWS Bedrock model ID to use for inference.
+        db:       Optional Agno storage backend (e.g. PostgresDb) for session history.
 
     Returns:
         A configured Agent instance ready to accept run messages.
@@ -122,4 +123,6 @@ def create_filesearch_extraction_agent(model_id: str = "zai.glm-5") -> Agent:
         instructions=[EXTRACTION_INSTRUCTIONS_FS],
         markdown=False,
         debug_mode=True,
+        db=db,
+        update_memory_on_run=False,
     )

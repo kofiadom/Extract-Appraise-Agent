@@ -1,24 +1,8 @@
 import { useState } from 'react';
-import { Settings, RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 
-export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen, onToggle }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(apiUrl);
+export default function Sidebar({ onReset, onLogout, phase, isOpen, onToggle }) {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-
-  function handleSave() {
-    const trimmed = draft.trim().replace(/\/$/, '');
-    onApiUrlChange(trimmed || apiUrl);
-    setEditing(false);
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === 'Enter') handleSave();
-    if (e.key === 'Escape') {
-      setDraft(apiUrl);
-      setEditing(false);
-    }
-  }
 
   function handleResetClick() {
     if (showResetConfirm) {
@@ -37,7 +21,7 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen
       className="fixed left-0 top-0 h-screen flex flex-col overflow-hidden transition-all duration-200"
       style={{ width: isOpen ? 260 : 48, background: '#1B2A4A', zIndex: 40 }}
     >
-      {/* Toggle button — always visible */}
+      {/* Toggle button */}
       <div
         className="flex items-center flex-shrink-0 border-b border-white/10"
         style={{ height: 56, minHeight: 56 }}
@@ -65,10 +49,7 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen
       {/* Collapsed: icon strip */}
       {!isOpen && (
         <div className="flex flex-col items-center gap-4 pt-5">
-          <div
-            title={`Status: ${phase}`}
-            className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center"
-          >
+          <div title={`Status: ${phase}`} className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
             <StatusDot phase={phase} />
           </div>
           {canReset && (
@@ -90,53 +71,6 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen
             AI-powered systematic review tool for evidence extraction and quality appraisal.
           </p>
 
-          {/* API URL config */}
-          <div className="px-5 py-5 border-b border-white/10">
-            <div className="flex items-center gap-2 mb-2">
-              <Settings size={12} className="text-white/40" />
-              <p className="text-white/50 text-xs font-medium uppercase tracking-wider">API Endpoint</p>
-            </div>
-            {editing ? (
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  autoFocus
-                  className="w-full px-3 py-2 rounded-lg bg-white/10 text-white text-xs border border-white/20 focus:outline-none focus:border-white/40 placeholder-white/30"
-                  placeholder="/extract-appraise/backend"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleSave}
-                    className="flex-1 py-1.5 rounded-md bg-white/20 text-white text-xs font-medium hover:bg-white/30 transition-colors"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => { setDraft(apiUrl); setEditing(false); }}
-                    className="flex-1 py-1.5 rounded-md bg-transparent text-white/50 text-xs font-medium hover:bg-white/10 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => { setDraft(apiUrl); setEditing(true); }}
-                className="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors group"
-              >
-                <p className="text-white/70 text-xs font-mono truncate group-hover:text-white transition-colors">
-                  {apiUrl}
-                </p>
-                <p className="text-white/30 text-xs mt-0.5 group-hover:text-white/50 transition-colors">
-                  Click to edit
-                </p>
-              </button>
-            )}
-          </div>
-
           {/* Status */}
           <div className="px-5 py-5 border-b border-white/10">
             <p className="text-white/50 text-xs font-medium uppercase tracking-wider mb-3">Status</p>
@@ -147,7 +81,7 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen
           <div className="flex-1" />
 
           {/* Reset */}
-          <div className="px-5 py-5 border-t border-white/10">
+          <div className="px-5 pt-5 border-t border-white/10">
             <button
               onClick={handleResetClick}
               disabled={!canReset}
@@ -166,9 +100,17 @@ export default function Sidebar({ apiUrl, onApiUrlChange, onReset, phase, isOpen
               )}
               {showResetConfirm ? 'Click again to confirm' : 'Reset & Clear Results'}
             </button>
-            <p className="text-white/25 text-xs mt-2 text-center">
-              Clears all data on backend and frontend
-            </p>
+          </div>
+
+          {/* Logout */}
+          <div className="px-5 py-4">
+            <button
+              onClick={onLogout}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-transparent transition-all duration-150"
+            >
+              <LogOut size={14} className="flex-shrink-0" />
+              Sign Out
+            </button>
           </div>
 
           {/* Footer */}
@@ -202,9 +144,7 @@ function StatusIndicator({ phase }) {
     done: { label: 'Complete', color: 'text-green-300', dot: 'bg-green-400' },
     error: { label: 'Error occurred', color: 'text-red-300', dot: 'bg-red-400' },
   };
-
   const s = states[phase] || states.idle;
-
   return (
     <div className="flex items-center gap-2.5">
       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.dot}`} />

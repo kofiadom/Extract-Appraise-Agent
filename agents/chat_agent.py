@@ -21,7 +21,6 @@ AgentOS exposes this agent at:
 """
 
 from agno.agent import Agent
-from agno.db.sqlite import SqliteDb
 from agno.models.aws import AwsBedrock
 from agno.tools import Toolkit
 
@@ -91,13 +90,14 @@ class PageIndexTools(Toolkit):
         return self._get_client().get_page_content(doc_id, pages)
 
 
-def create_chat_agent(client_getter, model_id: str) -> Agent:
+def create_chat_agent(client_getter, model_id: str, db=None) -> Agent:
     """
     Create an Agno document chat agent backed by self-hosted PageIndex tools.
 
     Args:
         client_getter: Zero-argument callable returning the PageIndexClient.
         model_id:      AWS Bedrock model ID used for the Agno chat agent.
+        db:            Agno storage backend for session history (e.g. PostgresDb).
     """
     return Agent(
         id="pageindex-chat-agent",
@@ -107,7 +107,8 @@ def create_chat_agent(client_getter, model_id: str) -> Agent:
         tools=[PageIndexTools(client_getter)],
         model=AwsBedrock(id=model_id),
         markdown=True,
-        db=SqliteDb(db_file="tmp/chat_sessions.db"),
+        db=db,
         add_history_to_context=True,
         num_history_runs=6,
+        update_memory_on_run=True,
     )

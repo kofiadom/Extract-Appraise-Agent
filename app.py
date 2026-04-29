@@ -14,11 +14,8 @@ AgentOS endpoints:
 
 Custom endpoints:
     POST   /upload-fs                  -> Upload PDFs, convert to markdown via LlamaParse
-    POST   /pipeline/store             -> Store team run results (called by demo UI)
-    GET    /pipeline/download/excel    -> Download evidence table (.xlsx)
-    GET    /pipeline/download/docx     -> Download quality appraisal (.docx)
-    GET    /pipeline/download/json     -> Download full results (.json)
-    DELETE /pipeline/reset             -> Clear stored results
+    POST   /pipeline/run-async         -> Start pipeline job (returns job_id)
+    GET    /pipeline/job/{id}          -> Poll pipeline job status
 
     POST   /chat/index                 -> Upload & index a PDF with PageIndex
     GET    /chat/documents             -> List indexed documents
@@ -30,10 +27,8 @@ Required .env vars for Chat with Doc:
 """
 
 import asyncio
-import json
 import logging
 import os
-import tempfile
 import uuid
 from pathlib import Path
 
@@ -46,10 +41,10 @@ from utils.llamaparse_helper import parse_pdf_to_markdown
 LLAMA_CLOUD_API_KEY = os.getenv("LLAMAPARSE_API_KEY", "")
 FS_MARKDOWN_DIR = Path("tmp/papers_fs_md")
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 
+from agno.db.postgres import PostgresDb
 from agno.models.aws import AwsBedrock
 from agno.os import AgentOS
 from agno.team import Team
@@ -58,10 +53,6 @@ from agno.team.mode import TeamMode
 from agents.extraction_agent import create_filesearch_extraction_agent, EXTRACTION_PROMPT_FS
 from agents.appraisal_agent import create_filesearch_appraisal_agent, APPRAISAL_STANDALONE_PROMPT_FS
 from agents.chat_agent import create_chat_agent
-from core.appraisal_schemas import AppraisalResult
-from core.schemas import ExtractionResult
-from utils.export_appraisal_docx import export_appraisal_to_docx
-from utils.export_excel import export_to_excel
 
 logger = logging.getLogger(__name__)
 # Uvicorn leaves root at WARNING; give our logger its own handler so INFO shows.
@@ -125,12 +116,16 @@ def get_pageindex_client():
 
 FS_PAPERS_DIR = Path("tmp/papers_fs")
 
+# ── PostgreSQL session storage (Agno/FastAPI) ──────────────────────────────────
+AGNO_DB_URL = os.getenv("AGNO_DB_URL")
+postgres_db = PostgresDb(db_url=AGNO_DB_URL) if AGNO_DB_URL else None
+
 # ── FileSearch agents ─────────────────────────────────────────────────────────
-extraction_agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID)
-appraisal_agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID)
+extraction_agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID, db=postgres_db)
+appraisal_agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID, db=postgres_db)
 
 # ── PageIndex chat agent (registered with AgentOS — uses /agents/pageindex-chat-agent/runs)
-chat_agent = create_chat_agent(get_pageindex_client, DEFAULT_MODEL_ID)
+chat_agent = create_chat_agent(get_pageindex_client, DEFAULT_MODEL_ID, db=postgres_db)
 
 evidence_team = Team(
     id="fs-evidence-team",
@@ -148,9 +143,6 @@ evidence_team = Team(
     ],
     markdown=False,
 )
-
-# ── In-memory state for downloads ─────────────────────────────────────────────
-_state: dict = {}
 
 # ── Async pipeline jobs ────────────────────────────────────────────────────────
 _pipeline_jobs: dict = {}
@@ -194,9 +186,9 @@ def _serialize_run(node) -> dict:
     }
 
 
-async def _run_pipeline_bg(job_id: str, message: str) -> None:
+async def _run_pipeline_bg(job_id: str, message: str, user_id: str, session_id: str) -> None:
     try:
-        response = await evidence_team.arun(message, stream=False)
+        response = await evidence_team.arun(message, user_id=user_id, session_id=session_id, stream=False)
         result = _serialize_run(response)
         _pipeline_jobs[job_id] = {"status": "done", "result": result}
 
@@ -277,6 +269,8 @@ app.add_middleware(
 async def pipeline_run_async(body: dict):
     """Start the pipeline in the background and return a job_id immediately."""
     markdown_files: list[str] = body.get("markdown_files", [])
+    user_id: str = body.get("user_id", "")
+    session_id: str = body.get("session_id", "")
     if not markdown_files:
         raise HTTPException(status_code=400, detail="markdown_files is required.")
     message = (
@@ -286,7 +280,7 @@ async def pipeline_run_async(body: dict):
     )
     job_id = str(uuid.uuid4())
     _pipeline_jobs[job_id] = {"status": "running"}
-    asyncio.create_task(_run_pipeline_bg(job_id, message))
+    asyncio.create_task(_run_pipeline_bg(job_id, message, user_id, session_id))
     return {"job_id": job_id, "status": "running"}
 
 
@@ -299,77 +293,8 @@ async def pipeline_job_status(job_id: str):
     return job
 
 
-@app.post("/pipeline/store", tags=["Downloads"])
-async def store_results(body: dict):
-    """
-    Store parsed team run results to enable file downloads.
-    Called by the demo UI after a successful team run.
-    """
-    try:
-        _state["result"] = ExtractionResult(papers=body.get("papers", []))
-        if "appraisal" in body:
-            _state["appraisal_result"] = AppraisalResult(**body["appraisal"])
-        else:
-            _state["appraisal_result"] = None
-        return {"message": "Results stored."}
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-
-@app.get("/pipeline/download/excel", tags=["Downloads"])
-async def download_excel():
-    """Download the evidence table as Excel (REST Table 2 format)."""
-    if "result" not in _state:
-        raise HTTPException(status_code=404, detail="No results. Run the team first.")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        export_to_excel(_state["result"].papers, output_path=tmp.name)
-        xl_bytes = Path(tmp.name).read_bytes()
-    return Response(
-        content=xl_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=evidence_table.xlsx"},
-    )
-
-
-@app.get("/pipeline/download/docx", tags=["Downloads"])
-async def download_docx():
-    """Download quality appraisal as Word document (20-criterion REST tool)."""
-    if not _state.get("appraisal_result"):
-        raise HTTPException(status_code=404, detail="No appraisal results.")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-        export_appraisal_to_docx(_state["appraisal_result"].appraisals, output_path=tmp.name)
-        docx_bytes = Path(tmp.name).read_bytes()
-    return Response(
-        content=docx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": "attachment; filename=quality_appraisal.docx"},
-    )
-
-
-@app.get("/pipeline/download/json", tags=["Downloads"])
-async def download_json():
-    """Download full results (evidence + appraisal) as JSON."""
-    if "result" not in _state:
-        raise HTTPException(status_code=404, detail="No results.")
-    output = _state["result"].model_dump()
-    if _state.get("appraisal_result"):
-        output["appraisal"] = _state["appraisal_result"].model_dump()
-    return Response(
-        content=json.dumps(output, indent=2, ensure_ascii=False, default=str),
-        media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=evidence_table.json"},
-    )
-
-
-@app.delete("/pipeline/reset", tags=["Downloads"])
-async def reset_pipeline():
-    """Clear stored results (does not remove uploaded files)."""
-    _state.clear()
-    return {"message": "Results cleared."}
-
-
 @app.post("/upload-fs", tags=["FileSearch"])
-async def upload_for_filesearch(files: list[UploadFile]):
+async def upload_for_filesearch(files: list[UploadFile], user_id: str = Form("")):
     """
     Save uploaded PDFs to disk, convert each to markdown via LlamaParse,
     and save the markdown to tmp/papers_fs_md/ for FileSearch agents to read.
@@ -395,7 +320,8 @@ async def upload_for_filesearch(files: list[UploadFile]):
 
         # Convert to markdown via LlamaParse
         stem = Path(f.filename).stem
-        md_filename = f"{stem}.md"
+        prefix = f"{user_id}_" if user_id else ""
+        md_filename = f"{prefix}{stem}.md"
         md_path = FS_MARKDOWN_DIR / md_filename
         try:
             markdown = await parse_pdf_to_markdown(str(dest.resolve()), LLAMA_CLOUD_API_KEY)
