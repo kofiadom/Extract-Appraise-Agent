@@ -14,6 +14,7 @@ venv/
 
 # ── Project runtime & outputs ─────────────────────────────────────────────────
 tmp/
+logs/
 /papers/
 *.xlsx
 *.docx
