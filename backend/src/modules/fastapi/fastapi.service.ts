@@ -123,10 +123,15 @@ export class FastApiService {
     userId: string,
     sessionId: string,
   ): Promise<Record<string, unknown>> {
+    const form = new URLSearchParams();
+    form.append('message', message);
+    form.append('user_id', userId);
+    form.append('session_id', sessionId);
+    form.append('stream', 'false');
     try {
       const { data } = await this.http.post(
         '/agents/pageindex-chat-agent/runs',
-        { message, user_id: userId, session_id: sessionId, stream: false },
+        form,
         { timeout: 120_000 },
       );
       return data as Record<string, unknown>;
@@ -138,10 +143,16 @@ export class FastApiService {
 
   // SSE streaming — returns the raw Node.js Readable so the controller can pipe it
   async chatQueryStream(message: string, userId: string, sessionId: string) {
+    const form = new URLSearchParams();
+    form.append('message', message);
+    form.append('user_id', userId);
+    form.append('session_id', sessionId);
+    form.append('stream', 'true');
+    form.append('stream_events', 'true');
     try {
       const { data } = await this.http.post(
         '/agents/pageindex-chat-agent/runs',
-        { message, user_id: userId, session_id: sessionId, stream: true, stream_events: true },
+        form,
         { responseType: 'stream', timeout: 120_000 },
       );
       return data;
