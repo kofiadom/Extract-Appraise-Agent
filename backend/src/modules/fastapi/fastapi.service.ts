@@ -141,7 +141,7 @@ export class FastApiService {
     try {
       const { data } = await this.http.post(
         '/agents/pageindex-chat-agent/runs',
-        { message, user_id: userId, session_id: sessionId, stream: true },
+        { message, user_id: userId, session_id: sessionId, stream: true, stream_events: true },
         { responseType: 'stream', timeout: 120_000 },
       );
       return data;
