@@ -240,39 +240,87 @@ export async function getJobResultById(jobId) {
 export function parseTeamContent(content) {
   if (!content) return null;
 
-  const attempts = [
-    content,
-    content.replace(/^```(?:json)?\s*|\s*```$/gm, '').trim(),
-  ];
+  // 1. Direct parse
+  try {
+    const d = JSON.parse(content.trim());
+    if (d?.papers) return d;
+  } catch {}
 
-  for (const c of attempts) {
+  // 2. Strip markdown fences then parse
+  const stripped = content
+    .replace(/^```(?:json)?\s*$/gm, '')
+    .replace(/^```\s*$/gm, '')
+    .trim();
+  if (stripped !== content.trim()) {
     try {
-      const d = JSON.parse(c.trim());
+      const d = JSON.parse(stripped);
       if (d?.papers) return d;
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
-  const start = content.indexOf('{');
-  if (start !== -1) {
+  // 3. String-aware brace scanner — finds every complete {...} block in order,
+  //    skipping over quoted strings so braces inside values don't confuse depth.
+  //    Continues past blocks that don't contain 'papers' instead of stopping.
+  let searchFrom = 0;
+  while (searchFrom < content.length) {
+    const blockStart = content.indexOf('{', searchFrom);
+    if (blockStart === -1) break;
+
     let depth = 0;
-    for (let i = start; i < content.length; i++) {
-      if (content[i] === '{') {
-        depth++;
-      } else if (content[i] === '}') {
+    let inString = false;
+    let escaped = false;
+    let blockEnd = -1;
+
+    for (let j = blockStart; j < content.length; j++) {
+      const ch = content[j];
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\' && inString) { escaped = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') {
         depth--;
-        if (depth === 0) {
-          try {
-            const d = JSON.parse(content.slice(start, i + 1));
-            if (d?.papers) return d;
-          } catch {
-            // ignore
-          }
-          break;
-        }
+        if (depth === 0) { blockEnd = j; break; }
       }
     }
+
+    if (blockEnd === -1) break; // unterminated — nothing more to find
+
+    try {
+      const d = JSON.parse(content.slice(blockStart, blockEnd + 1));
+      if (d?.papers) return d;
+    } catch {}
+
+    searchFrom = blockStart + 1; // advance past this block's opening brace and keep scanning
+  }
+
+  return null;
+}
+
+/**
+ * Search the full raw result tree for a parseable { papers, appraisal } structure.
+ * Looks at every content string in the top-level node and all member_responses
+ * recursively — handles cases where the team coordinator returns empty top-level
+ * content but the combined JSON lives in a member agent's response.
+ */
+export function findParsedResult(raw) {
+  if (!raw) return null;
+
+  const candidates = [];
+
+  function collect(node) {
+    if (!node) return;
+    if (typeof node === 'string') { if (node) candidates.push(node); return; }
+    // Prefer top-level content (team coordinator output) first
+    if (node.content) candidates.push(node.content);
+    for (const m of node.member_responses ?? []) collect(m);
+  }
+
+  collect(raw);
+
+  for (const c of candidates) {
+    const parsed = parseTeamContent(c);
+    if (parsed) return parsed;
   }
 
   return null;

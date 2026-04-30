@@ -18,7 +18,7 @@ import {
   startPipelineJob,
   pollPipelineJob,
   getPipelineResult,
-  parseTeamContent,
+  findParsedResult,
   sumMetrics,
 } from './services/api.js';
 
@@ -146,8 +146,7 @@ export default function App() {
 
       setElapsedMs(Date.now() - startTs);
 
-      const content = raw?.content ?? (typeof raw === 'string' ? raw : null);
-      const parsed = parseTeamContent(content);
+      const parsed = findParsedResult(raw);
       setMetrics(sumMetrics(raw));
 
       if (parsed) {
@@ -172,7 +171,8 @@ export default function App() {
   }, [markdownFiles]);
 
   // --- Load a historical result from the history drawer ---
-  const loadHistoricalResult = useCallback(({ parsed, metrics: m, jobId, raw }) => {
+  const loadHistoricalResult = useCallback(({ metrics: m, jobId, raw }) => {
+    const parsed = findParsedResult(raw);
     setCurrentJobId(jobId);
     setMetrics(m);
     setElapsedMs(null);

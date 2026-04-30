@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Clock, FileText, Loader2, ChevronDown, BookOpen } from 'lucide-react';
-import { listJobs, getJobResultById, parseTeamContent, sumMetrics } from '../services/api.js';
+import { listJobs, getJobResultById, sumMetrics } from '../services/api.js';
 
 const LIMIT = 15;
 
@@ -59,10 +59,8 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
     setLoadingJobId(job.id);
     try {
       const raw = await getJobResultById(job.id);
-      const content = raw?.content ?? (typeof raw === 'string' ? raw : null);
-      const parsed = parseTeamContent(content);
       const metrics = sumMetrics(raw);
-      onLoadResult({ parsed, metrics, jobId: job.id, raw });
+      onLoadResult({ metrics, jobId: job.id, raw });
       onClose();
     } catch {
       // leave drawer open so user sees the job list still
