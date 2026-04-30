@@ -18,8 +18,7 @@ import { IndexedDocument } from '../entities/indexed-document.entity';
         password: config.get<string>('DB_PASSWORD', 'postgres'),
         database: config.get<string>('DB_NAME', 'agno_rag'),
         entities: [User, PipelineJob, IndexedDocument],
-        // auto-create tables in dev; use migrations in production
-        synchronize: config.get<string>('NODE_ENV') !== 'production',
+        synchronize: true,
         logging: config.get<string>('NODE_ENV') === 'development',
       }),
     }),
