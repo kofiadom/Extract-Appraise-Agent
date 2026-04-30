@@ -32,8 +32,8 @@ export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpe
               <BookOpen size={14} className="text-white" />
             </div>
             <div className="min-w-0">
-              <p className="text-white font-semibold text-sm leading-tight truncate">REST Evidence</p>
-              <p className="text-white/50 text-xs leading-tight">Extractor</p>
+              <p className="text-white font-semibold text-sm leading-tight truncate">RES</p>
+              <p className="text-white/50 text-xs leading-tight">Evidence Extractor</p>
             </div>
           </div>
         )}
@@ -75,7 +75,7 @@ export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpe
       {isOpen && (
         <>
           <p className="text-white/40 text-xs px-5 pt-3 pb-4 border-b border-white/10 leading-relaxed">
-            AI-powered systematic review tool for evidence extraction and quality appraisal.
+            Your AI-powered Evidence Synthesis Assistant
           </p>
 
           {/* Status */}
@@ -133,7 +133,7 @@ export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpe
 
           {/* Footer */}
           <div className="px-5 pb-5">
-            <p className="text-white/20 text-xs text-center">REST Evidence Extractor v1.0</p>
+            <p className="text-white/20 text-xs text-center">RES v1.0</p>
           </div>
         </>
       )}
