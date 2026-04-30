@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download, FileText, MessageSquare, FlaskConical } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
+import HistoryDrawer from './components/HistoryDrawer.jsx';
 import StepIndicator from './components/StepIndicator.jsx';
 import UploadZone from './components/UploadZone.jsx';
 import MetricsBar from './components/MetricsBar.jsx';
@@ -36,6 +37,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
   const [appMode, setAppMode] = useState('extractor');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [phase, setPhase] = useState('idle');
   const [files, setFiles] = useState([]);
   const [markdownFiles, setMarkdownFiles] = useState([]);
@@ -169,6 +171,26 @@ export default function App() {
     }
   }, [markdownFiles]);
 
+  // --- Load a historical result from the history drawer ---
+  const loadHistoricalResult = useCallback(({ parsed, metrics: m, jobId, raw }) => {
+    setCurrentJobId(jobId);
+    setMetrics(m);
+    setElapsedMs(null);
+    setFiles([]);
+    setMarkdownFiles([]);
+    setShowPdf(false);
+    setErrorMsg('');
+    if (parsed) {
+      setResults(parsed);
+      setPhase('done');
+      setActiveTab('evidence');
+    } else {
+      setResults({ papers: [], appraisal: { appraisals: [] }, _raw: raw?.content });
+      setPhase('done');
+      setErrorMsg('Results loaded but could not be parsed into structured data.');
+    }
+  }, []);
+
   // --- Reset (local state only — no API call needed) ---
   const handleReset = useCallback(() => {
     setPhase('idle');
@@ -194,9 +216,16 @@ export default function App() {
       <Sidebar
         onReset={handleReset}
         onLogout={handleLogout}
+        onOpenHistory={() => setHistoryOpen(true)}
         phase={phase}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((v) => !v)}
+      />
+
+      <HistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onLoadResult={loadHistoricalResult}
       />
 
       <main

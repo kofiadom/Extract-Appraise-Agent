@@ -221,6 +221,20 @@ export async function chatQueryStream(docId, message, sessionId, callbacks = {})
   onDone?.();
 }
 
+// ── Job history ───────────────────────────────────────────────────────────────
+
+export async function listJobs({ limit = 20, offset = 0, status } = {}) {
+  const params = { limit, offset };
+  if (status) params.status = status;
+  const { data } = await api.get('/api/v1/jobs', { params });
+  return data.data; // { jobs: PipelineJob[], total: number }
+}
+
+export async function getJobResultById(jobId) {
+  const { data } = await api.get(`/api/v1/jobs/${jobId}/result`);
+  return data.data;
+}
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 export function parseTeamContent(content) {

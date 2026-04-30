@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight, LogOut, Clock } from 'lucide-react';
 
-export default function Sidebar({ onReset, onLogout, phase, isOpen, onToggle }) {
+export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpen, onToggle }) {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   function handleResetClick() {
@@ -52,6 +52,13 @@ export default function Sidebar({ onReset, onLogout, phase, isOpen, onToggle }) 
           <div title={`Status: ${phase}`} className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
             <StatusDot phase={phase} />
           </div>
+          <button
+            onClick={onOpenHistory}
+            title="Run History"
+            className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <Clock size={13} />
+          </button>
           {canReset && (
             <button
               onClick={handleResetClick}
@@ -75,6 +82,17 @@ export default function Sidebar({ onReset, onLogout, phase, isOpen, onToggle }) 
           <div className="px-5 py-5 border-b border-white/10">
             <p className="text-white/50 text-xs font-medium uppercase tracking-wider mb-3">Status</p>
             <StatusIndicator phase={phase} />
+          </div>
+
+          {/* History button */}
+          <div className="px-5 pt-5">
+            <button
+              onClick={onOpenHistory}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-transparent transition-all duration-150"
+            >
+              <Clock size={14} className="flex-shrink-0" />
+              Run History
+            </button>
           </div>
 
           {/* Spacer */}
@@ -125,24 +143,24 @@ export default function Sidebar({ onReset, onLogout, phase, isOpen, onToggle }) 
 
 function StatusDot({ phase }) {
   const dots = {
-    idle: 'bg-white/30',
+    idle:      'bg-white/30',
     uploading: 'bg-blue-400 animate-pulse',
-    uploaded: 'bg-green-400',
-    running: 'bg-amber-400 animate-pulse',
-    done: 'bg-green-400',
-    error: 'bg-red-400',
+    uploaded:  'bg-green-400',
+    running:   'bg-amber-400 animate-pulse',
+    done:      'bg-green-400',
+    error:     'bg-red-400',
   };
   return <span className={`w-2.5 h-2.5 rounded-full ${dots[phase] || dots.idle}`} />;
 }
 
 function StatusIndicator({ phase }) {
   const states = {
-    idle: { label: 'Ready', color: 'text-white/40', dot: 'bg-white/20' },
-    uploading: { label: 'Uploading files…', color: 'text-blue-300', dot: 'bg-blue-400 animate-pulse' },
-    uploaded: { label: 'Files ready', color: 'text-green-300', dot: 'bg-green-400' },
-    running: { label: 'Pipeline running…', color: 'text-amber-300', dot: 'bg-amber-400 animate-pulse' },
-    done: { label: 'Complete', color: 'text-green-300', dot: 'bg-green-400' },
-    error: { label: 'Error occurred', color: 'text-red-300', dot: 'bg-red-400' },
+    idle:      { label: 'Ready',             color: 'text-white/40', dot: 'bg-white/20' },
+    uploading: { label: 'Uploading files…',  color: 'text-blue-300', dot: 'bg-blue-400 animate-pulse' },
+    uploaded:  { label: 'Files ready',       color: 'text-green-300', dot: 'bg-green-400' },
+    running:   { label: 'Pipeline running…', color: 'text-amber-300', dot: 'bg-amber-400 animate-pulse' },
+    done:      { label: 'Complete',          color: 'text-green-300', dot: 'bg-green-400' },
+    error:     { label: 'Error occurred',    color: 'text-red-300',   dot: 'bg-red-400' },
   };
   const s = states[phase] || states.idle;
   return (
