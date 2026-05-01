@@ -7,12 +7,11 @@ services:
       dockerfile: Dockerfile
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env or Coolify env vars}
       POSTGRES_DB: agno_rag
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # NOTE: Port intentionally NOT exposed — only internal services need DB access
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -39,7 +38,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      AGNO_DB_URL: postgresql+psycopg://postgres:postgres@postgres:5432/agno_sessions
+      AGNO_DB_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@postgres:5432/agno_sessions
     env_file: .env
     volumes:
       - ./tmp:/app/tmp
@@ -67,7 +66,7 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USERNAME: postgres
-      DB_PASSWORD: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: agno_rag
       FASTAPI_URL: http://fastapi:7777
     env_file: ./backend/.env

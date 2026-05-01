@@ -16,7 +16,7 @@ export default new DataSource({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
   username: process.env.DB_USERNAME || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+  password: process.env.DB_PASSWORD ?? (() => { throw new Error('DB_PASSWORD env var is required'); })(),
   database: process.env.DB_NAME || 'agno_rag',
   entities: [User, PipelineJob, IndexedDocument],
   migrations: ['dist/migrations/*.js'],
