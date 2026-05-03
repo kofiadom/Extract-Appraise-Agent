@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download, FileText, MessageSquare, FlaskConical } from 'lucide-react';
+import { AlertCircle, RefreshCw, BookOpen, ClipboardList, Download, FileText, MessageSquare, FlaskConical, CheckCircle, XCircle } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
 import HistoryDrawer from './components/HistoryDrawer.jsx';
 import StepIndicator from './components/StepIndicator.jsx';
@@ -56,6 +56,8 @@ export default function App() {
   // Per-document tracking: [{ jobId, fileName, displayName, status, progress, error }]
   const [docStatuses, setDocStatuses] = useState([]);
   const [results, setResults] = useState(null);
+  const [individualResults, setIndividualResults] = useState([]); // Store results for each document separately
+  const [selectedDocIndex, setSelectedDocIndex] = useState(0); // Which document's results to show
   const [metrics, setMetrics] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
@@ -194,23 +196,39 @@ export default function App() {
       // 4. Collect results from all completed jobs
       setElapsedMs(Date.now() - startTs);
 
-      const allPapers = [];
-      const allAppraisals = [];
+      const individualResults = [];
       const allMetrics = [];
 
       for (const doc of tracker) {
-        if (doc.status !== 'completed') continue;
-        try {
-          const raw = await getPipelineResult(doc.jobId);
-          const parsed = findParsedResult(raw);
-          if (parsed?.papers) allPapers.push(...parsed.papers);
-          if (parsed?.appraisal?.appraisals) allAppraisals.push(...parsed.appraisal.appraisals);
-          if (parsed?.appraisals) allAppraisals.push(...parsed.appraisals);
-          allMetrics.push(sumMetrics(raw));
-        } catch {
-          // result fetch failed for this doc — skip
+        const docResult = {
+          jobId: doc.jobId,
+          fileName: doc.fileName,
+          displayName: doc.displayName,
+          status: doc.status,
+          papers: [],
+          appraisals: [],
+          raw: null,
+          error: doc.error,
+        };
+
+        if (doc.status === 'completed') {
+          try {
+            const raw = await getPipelineResult(doc.jobId);
+            const parsed = findParsedResult(raw);
+            docResult.raw = raw;
+            if (parsed?.papers) docResult.papers = parsed.papers;
+            if (parsed?.appraisal?.appraisals) docResult.appraisals = parsed.appraisal.appraisals;
+            if (parsed?.appraisals) docResult.appraisals = parsed.appraisals;
+            allMetrics.push(sumMetrics(raw));
+          } catch {
+            // result fetch failed for this doc — keep empty results
+          }
         }
+
+        individualResults.push(docResult);
       }
+
+      setIndividualResults(individualResults);
 
       // 5. Aggregate metrics across all jobs
       const mergedMetrics = allMetrics.reduce(
@@ -225,20 +243,25 @@ export default function App() {
       );
       setMetrics(mergedMetrics);
 
-      if (allPapers.length > 0 || allAppraisals.length > 0) {
-        setResults({ papers: allPapers, appraisal: { appraisals: allAppraisals } });
-        setPhase('done');
-        setActiveTab('evidence');
+      // Set initial selected document (first completed one, or first one if all failed)
+      const firstCompletedIndex = individualResults.findIndex(r => r.status === 'completed');
+      setSelectedDocIndex(firstCompletedIndex >= 0 ? firstCompletedIndex : 0);
 
-        const failedCount = tracker.filter((d) => d.status === 'failed').length;
-        if (failedCount > 0) {
-          setErrorMsg(`${failedCount} document(s) failed to process. Results shown for the remaining documents.`);
-        }
-      } else {
-        // All failed
-        setResults({ papers: [], appraisal: { appraisals: [] } });
-        setPhase('done');
-        setErrorMsg('All documents failed to process. Please check your files and try again.');
+      // Set results to the first document's results
+      const firstResult = individualResults[selectedDocIndex] || individualResults[0];
+      if (firstResult) {
+        setResults({
+          papers: firstResult.papers,
+          appraisal: { appraisals: firstResult.appraisals }
+        });
+      }
+
+      setPhase('done');
+      setActiveTab('evidence');
+
+      const failedCount = tracker.filter((d) => d.status === 'failed').length;
+      if (failedCount > 0) {
+        setErrorMsg(`${failedCount} document(s) failed to process. Use the document selector to view results for successful documents.`);
       }
     } catch (err) {
       setElapsedMs(Date.now() - startTs);
@@ -273,13 +296,26 @@ export default function App() {
     }
   }, []);
 
+  // --- Handle document selection ---
+  const handleDocSelect = useCallback((index) => {
+    setSelectedDocIndex(index);
+    const selectedResult = individualResults[index];
+    if (selectedResult) {
+      setResults({
+        papers: selectedResult.papers,
+        appraisal: { appraisals: selectedResult.appraisals }
+      });
+    }
+  }, [individualResults]);
+
   // --- Reset (local state only — no API call needed) ---
   const handleReset = useCallback(() => {
     setPhase('idle');
     setFiles([]);
     setMarkdownFiles([]);
-    setDocStatuses([]);
     setResults(null);
+    setIndividualResults([]);
+    setSelectedDocIndex(0);
     setMetrics(null);
     setElapsedMs(null);
     setErrorMsg('');
@@ -419,16 +455,52 @@ export default function App() {
             </div>
           )}
 
-          {phase === 'done' && (
-            <>
-              <MetricsBar
-                metrics={metrics}
-                papersCount={papers.length}
-                appraised={appraisals.length}
-                elapsedMs={elapsedMs}
-              />
+           {phase === 'done' && (
+             <>
+               <MetricsBar
+                 metrics={metrics}
+                 papersCount={papers.length}
+                 appraised={appraisals.length}
+                 elapsedMs={elapsedMs}
+               />
 
-              <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+               {/* Document selector - only show if multiple documents were processed */}
+               {individualResults.length > 1 && (
+                 <div className="mb-4">
+                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                     Select Document to View Results:
+                   </label>
+                   <div className="flex flex-wrap gap-2">
+                     {individualResults.map((result, index) => (
+                       <button
+                         key={result.jobId}
+                         onClick={() => handleDocSelect(index)}
+                         className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                           selectedDocIndex === index
+                             ? 'bg-[#1B2A4A] text-white shadow-sm'
+                             : result.status === 'completed'
+                             ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+                             : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
+                         }`}
+                       >
+                         <FileText size={14} />
+                         <span className="truncate max-w-32">{result.displayName}</span>
+                         {result.status === 'completed' ? (
+                           <CheckCircle size={12} className="text-green-600 flex-shrink-0" />
+                         ) : result.status === 'failed' ? (
+                           <XCircle size={12} className="text-red-600 flex-shrink-0" />
+                         ) : null}
+                       </button>
+                     ))}
+                   </div>
+                   <p className="text-xs text-gray-500 mt-2">
+                     Showing results for: <strong>{individualResults[selectedDocIndex]?.displayName}</strong>
+                     {individualResults[selectedDocIndex]?.status === 'failed' && ' (Failed to process)'}
+                   </p>
+                 </div>
+               )}
+
+               <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-gray-100 shadow-card inline-flex">
                   {TABS.map(({ id, label, icon: Icon }) => (
                     <button
