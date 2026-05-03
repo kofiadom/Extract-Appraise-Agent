@@ -273,9 +273,6 @@ async def pipeline_run_async(body: dict):
     session_id: str = body.get("session_id", "")
     if not markdown_files:
         raise HTTPException(status_code=400, detail="markdown_files is required.")
-    
-    # We now expect markdown_files to be exactly 1 file because NestJS submits jobs individually.
-    # But just in case, we'll keep the instructions general.
     message = (
         f"Files: {', '.join(markdown_files)}\n\n"
         "Extract structured evidence from ALL provided markdown files, "
@@ -310,16 +307,15 @@ async def upload_for_filesearch(files: list[UploadFile], user_id: str = Form("")
     FS_PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     FS_MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Read concurrency limit from env, default 3
-    max_concurrent = int(os.getenv("MAX_CONCURRENT_DOCS", "3"))
-    semaphore = asyncio.Semaphore(max_concurrent)
+    saved_paths = []
+    markdown_files = []
 
-    async def process_file(f: UploadFile):
+    for f in files:
         # Save the original PDF
         dest = FS_PAPERS_DIR / f.filename
         content = await f.read()
         dest.write_bytes(content)
-        saved_path = str(dest.resolve())
+        saved_paths.append(str(dest.resolve()))
         logger.info("Saved for FileSearch: %s", dest)
 
         # Convert to markdown via LlamaParse
@@ -327,22 +323,15 @@ async def upload_for_filesearch(files: list[UploadFile], user_id: str = Form("")
         prefix = f"{user_id}_" if user_id else ""
         md_filename = f"{prefix}{stem}.md"
         md_path = FS_MARKDOWN_DIR / md_filename
-        
-        async with semaphore:
-            try:
-                markdown = await parse_pdf_to_markdown(saved_path, LLAMA_CLOUD_API_KEY)
-                md_path.write_text(markdown, encoding="utf-8")
-                logger.info("Markdown saved: %s (%d chars)", md_path, len(markdown))
-                return saved_path, md_filename
-            except Exception as exc:
-                logger.error("LlamaParse failed for %s: %s", f.filename, exc)
-                raise HTTPException(status_code=500, detail=f"LlamaParse failed for {f.filename}: {exc}")
+        try:
+            markdown = await parse_pdf_to_markdown(str(dest.resolve()), LLAMA_CLOUD_API_KEY)
+            md_path.write_text(markdown, encoding="utf-8")
+            logger.info("Markdown saved: %s (%d chars)", md_path, len(markdown))
+        except Exception as exc:
+            logger.error("LlamaParse failed for %s: %s", f.filename, exc)
+            raise HTTPException(status_code=500, detail=f"LlamaParse failed for {f.filename}: {exc}")
 
-    tasks = [process_file(f) for f in files]
-    results = await asyncio.gather(*tasks)
-
-    saved_paths = [r[0] for r in results]
-    markdown_files = [r[1] for r in results]
+        markdown_files.append(md_filename)
 
     return {"files": saved_paths, "markdown_files": markdown_files}
 

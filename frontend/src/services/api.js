@@ -71,7 +71,7 @@ export async function uploadFiles(files) {
 
 export async function startPipelineJob(markdownFiles) {
   const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles });
-  return data.data.jobIds; // Now returns array of jobIds
+  return data.data.jobId;
 }
 
 export async function pollPipelineJob(jobId) {

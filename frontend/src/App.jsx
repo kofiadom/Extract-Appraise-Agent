@@ -11,7 +11,6 @@ import DownloadTab from './components/DownloadTab.jsx';
 import PdfViewer from './components/PdfViewer.jsx';
 import ChatWithDoc from './components/ChatWithDoc.jsx';
 import AuthScreen from './components/AuthScreen.jsx';
-import DocumentProgressList from './components/DocumentProgressList.jsx';
 import {
   getToken,
   clearToken,
@@ -42,8 +41,7 @@ export default function App() {
   const [phase, setPhase] = useState('idle');
   const [files, setFiles] = useState([]);
   const [markdownFiles, setMarkdownFiles] = useState([]);
-  const [currentJobIds, setCurrentJobIds] = useState([]);
-  const [jobStatuses, setJobStatuses] = useState({}); // { jobId: { status: 'queued'|'running'|'completed'|'failed', name: string, error?: string } }
+  const [currentJobId, setCurrentJobId] = useState(null);
   const [results, setResults] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(null);
@@ -102,8 +100,7 @@ export default function App() {
     setMetrics(null);
     setElapsedMs(null);
     setErrorMsg('');
-    setCurrentJobIds([]);
-    setJobStatuses({});
+    setCurrentJobId(null);
   }, []);
 
   // --- Upload phase ---
@@ -132,102 +129,34 @@ export default function App() {
     setErrorMsg('');
     const startTs = Date.now();
     try {
-      const jobIds = await startPipelineJob(markdownFiles);
-      setCurrentJobIds(jobIds);
+      const jobId = await startPipelineJob(markdownFiles);
+      setCurrentJobId(jobId);
 
-      // Initialize job statuses - map each jobId to its corresponding document name
-      const initialStatuses = {};
-      jobIds.forEach((jobId, index) => {
-        const fileName = files[index]?.name || `Document ${index + 1}`;
-        initialStatuses[jobId] = { status: 'queued', name: fileName };
-      });
-      setJobStatuses(initialStatuses);
-
-      // Poll all jobs concurrently until all are completed or failed
-      const pollJobs = async () => {
-        const promises = jobIds.map(async (jobId) => {
-          try {
-            const job = await pollPipelineJob(jobId);
-            setJobStatuses(prev => ({
-              ...prev,
-              [jobId]: { ...prev[jobId], status: job.status, error: job.error }
-            }));
-            return { jobId, status: job.status, result: job.status === 'completed' ? await getPipelineResult(jobId) : null };
-          } catch (err) {
-            setJobStatuses(prev => ({
-              ...prev,
-              [jobId]: { ...prev[jobId], status: 'failed', error: err.message }
-            }));
-            return { jobId, status: 'failed', error: err.message };
-          }
-        });
-
-        return Promise.all(promises);
-      };
-
-      // Poll every 3 seconds until all jobs are done
-      let allCompleted = false;
-      while (!allCompleted) {
-        await new Promise((r) => setTimeout(r, 3_000));
-        const jobResults = await pollJobs();
-
-        allCompleted = jobResults.every(result =>
-          result.status === 'completed' || result.status === 'failed'
-        );
-
-        if (allCompleted) {
-          // Aggregate results from all completed jobs
-          const completedResults = jobResults.filter(r => r.status === 'completed' && r.result);
-          const failedJobs = jobResults.filter(r => r.status === 'failed');
-
-          if (completedResults.length === 0) {
-            throw new Error('All pipeline jobs failed');
-          }
-
-          // Aggregate papers and appraisals from all results
-          const allPapers = [];
-          const allAppraisals = [];
-          let totalMetrics = { input_tokens: 0, output_tokens: 0, total_tokens: 0, cost_usd: 0, by_model: {} };
-
-          completedResults.forEach(({ result }) => {
-            const parsed = findParsedResult(result);
-            if (parsed) {
-              allPapers.push(...(parsed.papers || []));
-              allAppraisals.push(...(parsed.appraisal?.appraisals || []));
-            }
-            const jobMetrics = sumMetrics(result);
-            totalMetrics.input_tokens += jobMetrics.input_tokens;
-            totalMetrics.output_tokens += jobMetrics.output_tokens;
-            totalMetrics.total_tokens += jobMetrics.total_tokens;
-            totalMetrics.cost_usd += jobMetrics.cost_usd;
-            // Merge by_model
-            Object.entries(jobMetrics.by_model).forEach(([model, modelMetrics]) => {
-              if (!totalMetrics.by_model[model]) {
-                totalMetrics.by_model[model] = { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
-              }
-              totalMetrics.by_model[model].input_tokens += modelMetrics.input_tokens;
-              totalMetrics.by_model[model].output_tokens += modelMetrics.output_tokens;
-              totalMetrics.by_model[model].cost_usd += modelMetrics.cost_usd;
-            });
-          });
-
-          setElapsedMs(Date.now() - startTs);
-          setMetrics(totalMetrics);
-
-          const aggregatedResults = {
-            papers: allPapers,
-            appraisal: { appraisals: allAppraisals }
-          };
-
-          setResults(aggregatedResults);
-          setPhase('done');
-          setActiveTab('evidence');
-
-          // Show warning if some jobs failed
-          if (failedJobs.length > 0) {
-            setErrorMsg(`${failedJobs.length} document(s) failed to process. Results shown for ${completedResults.length} successful document(s).`);
-          }
+      // Poll every 6 s until completed or failed
+      let raw;
+      while (true) {
+        await new Promise((r) => setTimeout(r, 6_000));
+        const job = await pollPipelineJob(jobId);
+        if (job.status === 'completed') {
+          raw = await getPipelineResult(jobId);
+          break;
         }
+        if (job.status === 'failed') throw new Error(job.error || 'Pipeline failed');
+      }
+
+      setElapsedMs(Date.now() - startTs);
+
+      const parsed = findParsedResult(raw);
+      setMetrics(sumMetrics(raw));
+
+      if (parsed) {
+        setResults(parsed);
+        setPhase('done');
+        setActiveTab('evidence');
+      } else {
+        setResults({ papers: [], appraisal: { appraisals: [] }, _raw: content });
+        setPhase('done');
+        setErrorMsg('Pipeline completed but the response could not be parsed into structured data.');
       }
     } catch (err) {
       setElapsedMs(Date.now() - startTs);
@@ -239,7 +168,7 @@ export default function App() {
       setErrorMsg(msg);
       setPhase('error');
     }
-  }, [markdownFiles, files]);
+  }, [markdownFiles]);
 
   // --- Load a historical result from the history drawer ---
   const loadHistoricalResult = useCallback(({ metrics: m, jobId, raw }) => {
@@ -272,8 +201,7 @@ export default function App() {
     setElapsedMs(null);
     setErrorMsg('');
     setActiveTab('evidence');
-    setCurrentJobIds([]);
-    setJobStatuses({});
+    setCurrentJobId(null);
   }, []);
 
   if (!isAuthenticated) {
@@ -401,10 +329,6 @@ export default function App() {
             </div>
           )}
 
-          {phase === 'running' && Object.keys(jobStatuses).length > 0 && (
-            <DocumentProgressList jobStatuses={jobStatuses} />
-          )}
-
           {phase === 'done' && (
             <>
               <MetricsBar
@@ -460,7 +384,7 @@ export default function App() {
               <div>
                 {activeTab === 'evidence' && <EvidenceTab papers={papers} />}
                 {activeTab === 'appraisal' && <AppraisalTab appraisals={appraisals} />}
-                {activeTab === 'downloads' && <DownloadTab jobId={currentJobIds[0]} />}
+                {activeTab === 'downloads' && <DownloadTab jobId={currentJobId} />}
               </div>
             </>
           )}
