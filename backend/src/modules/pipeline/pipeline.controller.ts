@@ -21,10 +21,10 @@ export class PipelineController {
 
   @Post('run')
   @ApiOperation({ summary: 'Start extraction + appraisal pipeline for uploaded papers' })
-  @ApiResponse({ status: 201, description: 'Pipeline job queued — poll /:jobId for status' })
+  @ApiResponse({ status: 201, description: 'Pipeline jobs queued — poll each jobId for status' })
   async run(@Body() body: RunPipelineDto, @CurrentUser() user: AuthUser) {
     const result = await this.pipelineService.runPipeline(user.userId, body.markdownFiles);
-    return { success: true, message: 'Pipeline job queued', data: result };
+    return { success: true, message: 'Pipeline jobs queued', data: result };
   }
 
   @Get(':jobId')
