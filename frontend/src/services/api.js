@@ -245,6 +245,11 @@ export async function getJobResultById(jobId) {
   return data.data;
 }
 
+export async function clearHistory() {
+  const { data } = await api.delete('/api/v1/jobs');
+  return data; // { success, message, data: { deleted } }
+}
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 export function parseTeamContent(content) {

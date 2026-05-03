@@ -100,6 +100,18 @@ export class JobsService {
     return true;
   }
 
+  /**
+   * Delete all pipeline_job records for a user from the database.
+   * Does NOT attempt to remove active Bull jobs from Redis — those will finish
+   * naturally. Only the DB history is cleared.
+   */
+  async clearHistory(userId: string): Promise<{ deleted: number }> {
+    const result = await this.jobRepo.delete({ userId });
+    const deleted = result.affected ?? 0;
+    this.logger.log(`History cleared for user ${userId}: ${deleted} record(s) deleted`);
+    return { deleted };
+  }
+
   async getMetrics(userId: string): Promise<QueueMetrics> {
     const rawRows = (await this.jobRepo
       .createQueryBuilder('job')

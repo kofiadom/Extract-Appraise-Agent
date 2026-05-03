@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Clock, FileText, Loader2, ChevronDown, BookOpen } from 'lucide-react';
-import { listJobs, getJobResultById, sumMetrics } from '../services/api.js';
+import { X, Clock, FileText, Loader2, ChevronDown, BookOpen, Trash2, AlertTriangle } from 'lucide-react';
+import { listJobs, getJobResultById, sumMetrics, clearHistory } from '../services/api.js';
 
 const LIMIT = 15;
 
@@ -19,6 +19,8 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingJobId, setLoadingJobId] = useState(null);
   const [error, setError] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const fetchJobs = useCallback(async (statusFilter, newOffset, append = false) => {
     if (append) setLoadingMore(true);
@@ -69,6 +71,21 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
     }
   }
 
+  async function handleClear() {
+    setClearing(true);
+    try {
+      await clearHistory();
+      setJobs([]);
+      setTotal(0);
+      setOffset(0);
+      setConfirmClear(false);
+    } catch {
+      // swallow — user can retry
+    } finally {
+      setClearing(false);
+    }
+  }
+
   return (
     <>
       {/* Backdrop */}
@@ -103,8 +120,8 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
           </button>
         </div>
 
-        {/* Filter pills + count */}
-        <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100 flex-shrink-0">
+        {/* Filter pills + count + clear button */}
+        <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100 flex-shrink-0 flex-wrap">
           {STATUS_FILTERS.map(({ id, label }) => (
             <button
               key={label}
@@ -120,6 +137,40 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
           ))}
           {total > 0 && (
             <span className="ml-auto text-xs text-gray-400">{total} run{total !== 1 ? 's' : ''}</span>
+          )}
+
+          {/* Clear history */}
+          {jobs.length > 0 && !confirmClear && (
+            <button
+              onClick={() => setConfirmClear(true)}
+              className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors ml-auto"
+              title="Clear all history"
+            >
+              <Trash2 size={12} />
+              Clear all
+            </button>
+          )}
+
+          {/* Inline confirmation */}
+          {confirmClear && (
+            <div className="w-full mt-2 flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
+              <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
+              <p className="text-xs text-red-700 flex-1">Delete all history? This cannot be undone.</p>
+              <button
+                onClick={handleClear}
+                disabled={clearing}
+                className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1 rounded-md transition-colors disabled:opacity-60 flex items-center gap-1"
+              >
+                {clearing ? <Loader2 size={10} className="animate-spin" /> : null}
+                Delete
+              </button>
+              <button
+                onClick={() => setConfirmClear(false)}
+                className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
           )}
         </div>
 

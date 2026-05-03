@@ -105,4 +105,12 @@ export class JobsController {
     }
     return { success: true, message: 'Job cancelled successfully' };
   }
+
+  @Delete()
+  @ApiOperation({ summary: 'Clear all run history for the current user' })
+  @ApiResponse({ status: 200, description: 'History cleared', type: ApiSuccessResponseDto })
+  async clearHistory(@CurrentUser() user: AuthUser) {
+    const result = await this.jobsService.clearHistory(user.userId);
+    return { success: true, message: `${result.deleted} record(s) deleted`, data: result };
+  }
 }
