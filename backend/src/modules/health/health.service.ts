@@ -26,8 +26,10 @@ export class HealthService {
       PORT: this.configService.get('PORT', 3000),
       FASTAPI_URL: this.configService.get('FASTAPI_URL', 'not set'),
       DB_NAME: this.configService.get('DB_NAME', 'not set'),
-      QUEUE_CONCURRENCY: this.configService.get('QUEUE_CONCURRENCY', 'not set'),
+      WORKER_CONCURRENCY: this.configService.get('WORKER_CONCURRENCY', '3'),
       MAX_DOCS_PER_RUN: this.configService.get('MAX_DOCS_PER_RUN', 'not set'),
+      ENABLE_THROTTLING: this.configService.get('ENABLE_THROTTLING', 'false'),
+      THROTTLE_LIMIT: this.configService.get('THROTTLE_LIMIT', '100'),
       ENABLE_SWAGGER: this.configService.get('ENABLE_SWAGGER', 'not set'),
     };
   }

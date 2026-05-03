@@ -60,9 +60,11 @@ import { RedisConfigService } from './config/redis.config';
   ],
   providers: [
     RedisConfigService,
-    // Apply ThrottlerGuard globally — all routes are rate-limited by default.
+    // Apply ThrottlerGuard globally — all routes are rate-limited when ENABLE_THROTTLING=true.
     // Use @SkipThrottle() on endpoints that should bypass (e.g. health checks).
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    ...(process.env.ENABLE_THROTTLING === 'true'
+      ? [{ provide: APP_GUARD, useClass: ThrottlerGuard }]
+      : []),
   ],
 })
 export class AppModule {}

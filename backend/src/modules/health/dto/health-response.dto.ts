@@ -13,11 +13,17 @@ export class EnvironmentVariablesDto {
   @ApiProperty({ example: 'agno_rag' })
   DB_NAME: string;
 
-  @ApiProperty({ example: '5' })
-  QUEUE_CONCURRENCY: string;
+  @ApiProperty({ example: '3' })
+  WORKER_CONCURRENCY: string;
 
   @ApiProperty({ example: '5' })
   MAX_DOCS_PER_RUN: string;
+
+  @ApiProperty({ example: 'true' })
+  ENABLE_THROTTLING: string;
+
+  @ApiProperty({ example: '100' })
+  THROTTLE_LIMIT: string;
 
   @ApiProperty({ example: 'true' })
   ENABLE_SWAGGER: string;

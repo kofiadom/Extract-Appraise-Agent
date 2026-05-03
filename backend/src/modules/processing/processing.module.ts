@@ -7,6 +7,10 @@ import { PipelineJob } from '../../entities/pipeline-job.entity';
 import { IndexedDocument } from '../../entities/indexed-document.entity';
 import { QUEUE_NAMES } from '../../types';
 
+// Read from env so JOB_TIMEOUT in .env is actually respected.
+// Default: 600 000 ms (10 minutes) — enough for large multi-paper pipelines.
+const JOB_TIMEOUT_MS = parseInt(process.env.JOB_TIMEOUT ?? '600000', 10);
+
 @Module({
   imports: [
     BullModule.registerQueue({
@@ -16,7 +20,7 @@ import { QUEUE_NAMES } from '../../types';
         removeOnFail: 5,
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
-        timeout: 10 * 60 * 1000,
+        timeout: JOB_TIMEOUT_MS,
       },
     }),
     TypeOrmModule.forFeature([PipelineJob, IndexedDocument]),

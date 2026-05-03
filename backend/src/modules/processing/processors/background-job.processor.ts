@@ -8,6 +8,10 @@ import { IndexedDocument } from '../../../entities/indexed-document.entity';
 import { JobPayload, JobResult, QUEUE_NAMES, JOB_TYPES } from '../../../types';
 import { FastApiService } from '../../fastapi/fastapi.service';
 
+// Allow up to WORKER_CONCURRENCY jobs to run simultaneously in this process.
+// Keep this in sync with MAX_CONCURRENT_DOCS in the FastAPI service.
+const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY ?? '3', 10);
+
 @Processor(QUEUE_NAMES.BACKGROUND_JOBS)
 export class BackgroundJobProcessor {
   private readonly logger = new Logger(BackgroundJobProcessor.name);
@@ -22,7 +26,7 @@ export class BackgroundJobProcessor {
 
   // ─── Generic stub ─────────────────────────────────────────────────────────
 
-  @Process(JOB_TYPES.BACKGROUND_JOB)
+  @Process({ name: JOB_TYPES.BACKGROUND_JOB, concurrency: WORKER_CONCURRENCY })
   async process(job: Job<JobPayload>): Promise<JobResult> {
     const startTime = Date.now();
     const { jobId, data } = job.data;
@@ -47,7 +51,7 @@ export class BackgroundJobProcessor {
 
   // ─── Paper pipeline (extraction + appraisal) ──────────────────────────────
 
-  @Process(JOB_TYPES.PAPER_PIPELINE)
+  @Process({ name: JOB_TYPES.PAPER_PIPELINE, concurrency: WORKER_CONCURRENCY })
   async processPaperPipeline(job: Job<JobPayload>): Promise<JobResult> {
     const startTime = Date.now();
     const { jobId, userId, data } = job.data;
@@ -98,7 +102,7 @@ export class BackgroundJobProcessor {
 
   // ─── Document indexing ─────────────────────────────────────────────────────
 
-  @Process(JOB_TYPES.DOCUMENT_INDEXING)
+  @Process({ name: JOB_TYPES.DOCUMENT_INDEXING, concurrency: WORKER_CONCURRENCY })
   async processDocumentIndexing(job: Job<JobPayload>): Promise<JobResult> {
     const startTime = Date.now();
     const { jobId, userId, data } = job.data;
