@@ -6,6 +6,7 @@ import { JOB_TYPES } from '../../types';
 export class PipelineService {
   constructor(private readonly jobsService: JobsService) {}
 
+  /** Legacy: submit all files as a single job (kept for backwards compat). */
   async runPipeline(
     userId: string,
     markdownFiles: string[],
@@ -15,6 +16,28 @@ export class PipelineService {
       jobType: JOB_TYPES.PAPER_PIPELINE,
       data: { markdownFiles },
     });
+  }
+
+  /**
+   * Submit one independent BullMQ job per markdown file.
+   * Returns an array of { jobId, fileName } so the frontend can track each
+   * document individually.
+   */
+  async runPipelineForFiles(
+    userId: string,
+    markdownFiles: string[],
+  ): Promise<{ jobId: string; fileName: string; status: string }[]> {
+    const jobs = await Promise.all(
+      markdownFiles.map(async (fileName) => {
+        const { jobId, status } = await this.jobsService.submitJob({
+          userId,
+          jobType: JOB_TYPES.PAPER_PIPELINE,
+          data: { markdownFiles: [fileName] },
+        });
+        return { jobId, fileName, status };
+      }),
+    );
+    return jobs;
   }
 
   async getPipelineStatus(jobId: string, userId: string) {

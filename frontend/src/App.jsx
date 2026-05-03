@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar.jsx';
 import HistoryDrawer from './components/HistoryDrawer.jsx';
 import StepIndicator from './components/StepIndicator.jsx';
 import UploadZone from './components/UploadZone.jsx';
+import DocumentProgressList from './components/DocumentProgressList.jsx';
 import MetricsBar from './components/MetricsBar.jsx';
 import EvidenceTab from './components/EvidenceTab.jsx';
 import AppraisalTab from './components/AppraisalTab.jsx';
@@ -15,7 +16,7 @@ import {
   getToken,
   clearToken,
   uploadFiles,
-  startPipelineJob,
+  startPipelineBatch,
   pollPipelineJob,
   getPipelineResult,
   findParsedResult,
@@ -33,6 +34,16 @@ const APP_MODES = [
   { id: 'chat',      label: 'Chat with Doc',      icon: MessageSquare },
 ];
 
+/** Strip userId prefix and .md extension from a markdown filename for display. */
+function toDisplayName(fileName) {
+  let name = fileName.replace(/\.md$/i, '');
+  // Strip UUID prefix (36 chars + underscore)
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i.test(name)) {
+    name = name.slice(37);
+  }
+  return name || fileName;
+}
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
   const [appMode, setAppMode] = useState('extractor');
@@ -42,6 +53,8 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [markdownFiles, setMarkdownFiles] = useState([]);
   const [currentJobId, setCurrentJobId] = useState(null);
+  // Per-document tracking: [{ jobId, fileName, displayName, status, progress, error }]
+  const [docStatuses, setDocStatuses] = useState([]);
   const [results, setResults] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(null);
@@ -96,6 +109,7 @@ export default function App() {
     setPhase('idle');
     setFiles([]);
     setMarkdownFiles([]);
+    setDocStatuses([]);
     setResults(null);
     setMetrics(null);
     setElapsedMs(null);
@@ -123,40 +137,108 @@ export default function App() {
     }
   }, [files]);
 
-  // --- Pipeline run phase ---
+  // --- Pipeline run phase (per-document batch) ---
   const handleRun = useCallback(async () => {
     setPhase('running');
     setErrorMsg('');
     const startTs = Date.now();
-    try {
-      const jobId = await startPipelineJob(markdownFiles);
-      setCurrentJobId(jobId);
 
-      // Poll every 6 s until completed or failed
-      let raw;
-      while (true) {
-        await new Promise((r) => setTimeout(r, 6_000));
-        const job = await pollPipelineJob(jobId);
-        if (job.status === 'completed') {
-          raw = await getPipelineResult(jobId);
-          break;
-        }
-        if (job.status === 'failed') throw new Error(job.error || 'Pipeline failed');
+    try {
+      // 1. Submit one job per file
+      const batchJobs = await startPipelineBatch(markdownFiles);
+
+      // 2. Initialise per-doc status list
+      const initial = batchJobs.map((j) => ({
+        jobId: j.jobId,
+        fileName: j.fileName,
+        displayName: toDisplayName(j.fileName),
+        status: 'queued',
+        progress: 0,
+        error: null,
+      }));
+      setDocStatuses(initial);
+      // Keep first jobId for the download tab fallback
+      setCurrentJobId(batchJobs[0]?.jobId ?? null);
+
+      // 3. Poll all jobs concurrently until every one is terminal
+      const POLL_INTERVAL = 6_000;
+      const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+
+      // mutable tracker so closures always see latest
+      const tracker = initial.map((d) => ({ ...d }));
+
+      while (tracker.some((d) => !terminalStatuses.has(d.status))) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+        await Promise.all(
+          tracker.map(async (doc, i) => {
+            if (terminalStatuses.has(doc.status)) return;
+            try {
+              const job = await pollPipelineJob(doc.jobId);
+              tracker[i] = {
+                ...tracker[i],
+                status: job.status,
+                progress: job.progress ?? tracker[i].progress,
+                error: job.error ?? null,
+              };
+            } catch {
+              // network hiccup — keep last known status
+            }
+          }),
+        );
+
+        // Push updated statuses into React state
+        setDocStatuses(tracker.map((d) => ({ ...d })));
       }
 
+      // 4. Collect results from all completed jobs
       setElapsedMs(Date.now() - startTs);
 
-      const parsed = findParsedResult(raw);
-      setMetrics(sumMetrics(raw));
+      const allPapers = [];
+      const allAppraisals = [];
+      const allMetrics = [];
 
-      if (parsed) {
-        setResults(parsed);
+      for (const doc of tracker) {
+        if (doc.status !== 'completed') continue;
+        try {
+          const raw = await getPipelineResult(doc.jobId);
+          const parsed = findParsedResult(raw);
+          if (parsed?.papers) allPapers.push(...parsed.papers);
+          if (parsed?.appraisal?.appraisals) allAppraisals.push(...parsed.appraisal.appraisals);
+          if (parsed?.appraisals) allAppraisals.push(...parsed.appraisals);
+          allMetrics.push(sumMetrics(raw));
+        } catch {
+          // result fetch failed for this doc — skip
+        }
+      }
+
+      // 5. Aggregate metrics across all jobs
+      const mergedMetrics = allMetrics.reduce(
+        (acc, m) => ({
+          input_tokens: (acc.input_tokens ?? 0) + (m.input_tokens ?? 0),
+          output_tokens: (acc.output_tokens ?? 0) + (m.output_tokens ?? 0),
+          total_tokens: (acc.total_tokens ?? 0) + (m.total_tokens ?? 0),
+          cost_usd: (acc.cost_usd ?? 0) + (m.cost_usd ?? 0),
+          by_model: { ...acc.by_model, ...m.by_model },
+        }),
+        {},
+      );
+      setMetrics(mergedMetrics);
+
+      if (allPapers.length > 0 || allAppraisals.length > 0) {
+        setResults({ papers: allPapers, appraisal: { appraisals: allAppraisals } });
         setPhase('done');
         setActiveTab('evidence');
+
+        const failedCount = tracker.filter((d) => d.status === 'failed').length;
+        if (failedCount > 0) {
+          setErrorMsg(`${failedCount} document(s) failed to process. Results shown for the remaining documents.`);
+        }
       } else {
-        setResults({ papers: [], appraisal: { appraisals: [] }, _raw: content });
+        // All failed
+        setResults({ papers: [], appraisal: { appraisals: [] } });
         setPhase('done');
-        setErrorMsg('Pipeline completed but the response could not be parsed into structured data.');
+        setErrorMsg('All documents failed to process. Please check your files and try again.');
       }
     } catch (err) {
       setElapsedMs(Date.now() - startTs);
@@ -196,6 +278,7 @@ export default function App() {
     setPhase('idle');
     setFiles([]);
     setMarkdownFiles([]);
+    setDocStatuses([]);
     setResults(null);
     setMetrics(null);
     setElapsedMs(null);
@@ -326,6 +409,13 @@ export default function App() {
                 onUpload={handleUpload}
                 onRun={handleRun}
               />
+            </div>
+          )}
+
+          {/* Per-document progress tracker — visible during 'running' phase */}
+          {phase === 'running' && docStatuses.length > 0 && (
+            <div className="mb-6">
+              <DocumentProgressList docStatuses={docStatuses} />
             </div>
           )}
 
