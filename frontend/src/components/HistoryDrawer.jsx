@@ -62,7 +62,8 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
     try {
       const raw = await getJobResultById(job.id);
       const metrics = sumMetrics(raw);
-      onLoadResult({ metrics, jobId: job.id, raw });
+      const elapsedMs = new Date(job.updatedAt).getTime() - new Date(job.createdAt).getTime();
+      onLoadResult({ metrics, jobId: job.id, raw, elapsedMs });
       onClose();
     } catch {
       // leave drawer open so user sees the job list still

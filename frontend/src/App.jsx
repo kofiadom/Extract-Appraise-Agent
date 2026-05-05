@@ -290,11 +290,11 @@ export default function App() {
   }, [markdownFiles]);
 
   // --- Load a historical result from the history drawer ---
-  const loadHistoricalResult = useCallback(({ metrics: m, jobId, raw }) => {
+  const loadHistoricalResult = useCallback(({ metrics: m, jobId, raw, elapsedMs }) => {
     const parsed = findParsedResult(raw);
     setCurrentJobId(jobId);
     setMetrics(m);
-    setElapsedMs(null);
+    setElapsedMs(elapsedMs || null);
     setFiles([]);
     setMarkdownFiles([]);
     setShowPdf(false);
