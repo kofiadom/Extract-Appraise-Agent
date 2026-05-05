@@ -116,7 +116,7 @@ APPRAISAL_STANDALONE_PROMPT_FS = (
 # Factory function
 # ---------------------------------------------------------------------------
 
-_BEDROCK_CFG = Config(read_timeout=600, connect_timeout=60, retries={"max_attempts": 0})
+_BEDROCK_CFG = Config(read_timeout=600, connect_timeout=60, retries={"max_attempts": 5, "mode": "standard"})
 
 
 class _AwsBedrockLongTimeout(AwsBedrock):

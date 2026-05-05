@@ -150,6 +150,25 @@ _pipeline_jobs: dict = {}
 # ── Async indexing jobs ────────────────────────────────────────────────────────
 _index_jobs: dict = {}
 
+# ── Concurrent pipeline limiter ────────────────────────────────────────────────
+# Each pipeline job makes several sequential Bedrock API calls (team coordinator,
+# extraction agent, appraisal agent). Allowing too many to run concurrently causes
+# AWS Bedrock rate-limit throttling across all users. This semaphore caps the number
+# of active pipeline runs; additional jobs wait in the asyncio queue until a slot
+# opens. BullMQ already queues jobs durably, so no work is lost.
+# Override with the MAX_CONCURRENT_PIPELINES env var (default: 2).
+_pipeline_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_pipeline_semaphore() -> asyncio.Semaphore:
+    """Lazily create the semaphore inside the running event loop."""
+    global _pipeline_semaphore
+    if _pipeline_semaphore is None:
+        limit = int(os.getenv("MAX_CONCURRENT_PIPELINES", "2"))
+        _pipeline_semaphore = asyncio.Semaphore(limit)
+        logger.info("Pipeline concurrency limit set to %d", limit)
+    return _pipeline_semaphore
+
 
 def _serialize_run(node) -> dict:
     """Recursively serialize an Agno RunResponse into a plain JSON-safe dict."""
@@ -186,29 +205,182 @@ def _serialize_run(node) -> dict:
     }
 
 
-async def _run_pipeline_bg(job_id: str, message: str, user_id: str, session_id: str) -> None:
-    try:
-        response = await evidence_team.arun(message, user_id=user_id, session_id=session_id, stream=False)
-        result = _serialize_run(response)
-        _pipeline_jobs[job_id] = {"status": "done", "result": result}
+async def _run_one_file(
+    md_filename: str,
+    user_id: str,
+    session_id: str,
+) -> dict:
+    """
+    Run the full extraction + appraisal pipeline for a SINGLE markdown file.
 
-        content = result.get("content", "")
-        logger.info("Pipeline job %s done (%d chars)", job_id, len(content))
+    Each call creates its own fresh Team + agent instances and sends a message
+    that references only one file. This keeps the agent context window bounded
+    to one paper regardless of how many files the user uploaded, preventing
+    token-limit failures on large documents.
+    """
+    job_extraction_agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID, db=postgres_db)
+    job_appraisal_agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID, db=postgres_db)
+    file_team = Team(
+        id=f"fs-evidence-team-{session_id}-{md_filename}",
+        name="FileSearch Evidence & Appraisal Team",
+        model=AwsBedrock(id=DEFAULT_MODEL_ID),
+        mode=TeamMode.coordinate,
+        members=[job_extraction_agent, job_appraisal_agent],
+        instructions=[
+            "You coordinate a two-step evidence synthesis pipeline using pre-converted markdown files.",
+            "The user's message contains the markdown filename to process (e.g. 'study.md').",
+            f"Step 1 — Delegate to the FileSearch Extraction Agent. Pass the file path and use this exact prompt:\n{EXTRACTION_PROMPT_FS}",
+            f"Step 2 — Delegate to the FileSearch Appraisal Agent. Pass the file path and use this exact prompt:\n{APPRAISAL_STANDALONE_PROMPT_FS}",
+            "Step 3 — Combine both outputs into one JSON object. Copy every field verbatim — do NOT rename, drop, or summarise any field. Output ONLY this JSON, no prose, no markdown fences:\n"
+            '{"papers": [<exact array from FileSearch Extraction Agent>], "appraisal": {"appraisals": [<exact array from FileSearch Appraisal Agent>]}}',
+        ],
+        markdown=False,
+    )
+    single_file_message = (
+        f"File: {md_filename}\n\n"
+        "Extract structured evidence from this markdown file, "
+        "then perform REST quality appraisal on the paper."
+    )
+    response = await file_team.arun(
+        single_file_message,
+        user_id=user_id,
+        session_id=f"{session_id}-{md_filename}",
+        stream=False,
+    )
+    return _serialize_run(response)
 
-        # Log a snippet of each member agent's output for visibility
-        for member in result.get("member_responses", []):
-            agent_id = member.get("agent_id", "unknown")
-            member_content = member.get("content") or ""
-            snippet = member_content[:200].replace("\n", " ")
-            logger.info(
-                "  [%s] output: %s%s",
-                agent_id,
-                snippet,
-                f"… (+{len(member_content) - 200} chars)" if len(member_content) > 200 else "",
-            )
-    except Exception as exc:
-        logger.error("Pipeline job %s failed: %s", job_id, exc)
-        _pipeline_jobs[job_id] = {"status": "error", "error": str(exc)}
+
+async def _run_pipeline_bg(job_id: str, markdown_files: list[str], user_id: str, session_id: str) -> None:
+    """
+    Run the evidence pipeline for a job, processing files one-at-a-time.
+
+    WHY sequential, not parallel:
+    - Each file's pipeline makes 3+ Bedrock API calls (team + extraction + appraisal).
+    - Running N files in parallel = N×3 simultaneous Bedrock calls → rate-limit throttling.
+    - Running them sequentially means at most 3 Bedrock calls at a time, regardless of N.
+    - Each file's agents only see ONE paper in their context window, so token limits
+      can never be hit no matter how large or how many the documents are.
+
+    WHY a semaphore on top of sequential:
+    - Multiple users submit jobs concurrently.
+    - The semaphore (MAX_CONCURRENT_PIPELINES, default 2) ensures at most 2 users'
+      jobs run simultaneously at the FastAPI level. Further jobs wait in asyncio
+      without blocking the event loop. BullMQ retains the durable job queue.
+    """
+    sem = _get_pipeline_semaphore()
+    async with sem:
+        logger.info(
+            "Pipeline job %s: processing %d file(s) concurrently (user=%s)",
+            job_id, len(markdown_files), user_id,
+        )
+        all_papers: list = []
+        all_appraisals: list = []
+        errors: list[str] = []
+
+        import json, re
+
+        # How many files to process simultaneously within this job.
+        # Each file's pipeline calls Bedrock sequentially (team → extraction → appraisal),
+        # so FILE_CONCURRENCY=3 means at most ~3 Bedrock calls in-flight at once —
+        # one per file, each at a different stage of its own pipeline.
+        # Tune via FILE_CONCURRENCY env var if you hit Bedrock rate limits.
+        file_concurrency = int(os.getenv("FILE_CONCURRENCY", "3"))
+        file_sem = asyncio.Semaphore(file_concurrency)
+
+        def _extract_json(raw: dict) -> dict | None:
+            """Pull the first valid JSON block containing 'papers' from a run result."""
+            content = raw.get("content", "")
+            try:
+                d = json.loads(content.strip())
+                if "papers" in d:
+                    return d
+            except Exception:
+                pass
+            stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
+            try:
+                d = json.loads(stripped)
+                if "papers" in d:
+                    return d
+            except Exception:
+                pass
+            for member in raw.get("member_responses", []):
+                mc = member.get("content", "")
+                try:
+                    d = json.loads(mc.strip())
+                    if "papers" in d:
+                        return d
+                except Exception:
+                    pass
+                stripped_mc = re.sub(r"```(?:json)?\s*|```", "", mc).strip()
+                try:
+                    d = json.loads(stripped_mc)
+                    if "papers" in d:
+                        return d
+                except Exception:
+                    pass
+            return None
+
+        async def _process_one(i: int, md_filename: str):
+            """Process a single file, bounded by file_sem."""
+            async with file_sem:
+                logger.info(
+                    "Pipeline job %s: starting file %d/%d — %s",
+                    job_id, i + 1, len(markdown_files), md_filename,
+                )
+                raw = await _run_one_file(md_filename, user_id, session_id)
+                return md_filename, _extract_json(raw)
+
+        # Run all files concurrently (≤ file_concurrency at a time).
+        # asyncio.gather preserves input order so results[i] matches markdown_files[i].
+        # return_exceptions=True means one file failing never cancels the others.
+        outcomes = await asyncio.gather(
+            *[_process_one(i, f) for i, f in enumerate(markdown_files)],
+            return_exceptions=True,
+        )
+
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                errors.append(str(outcome))
+                logger.error("Pipeline job %s: a file task raised — %s", job_id, outcome)
+                continue
+            md_filename, parsed = outcome
+            if parsed:
+                all_papers.extend(parsed.get("papers", []))
+                appraisal_node = parsed.get("appraisal", parsed)
+                all_appraisals.extend(appraisal_node.get("appraisals", []))
+                logger.info(
+                    "Pipeline job %s: file %s — extracted %d paper(s), %d appraisal(s)",
+                    job_id, md_filename,
+                    len(parsed.get("papers", [])),
+                    len(appraisal_node.get("appraisals", [])),
+                )
+            else:
+                errors.append(f"{md_filename}: could not parse agent output into structured JSON")
+                logger.warning("Pipeline job %s: no parseable JSON for %s", job_id, md_filename)
+
+        # Combine per-file results into the shape the frontend expects
+        combined_content = json.dumps({
+            "papers": all_papers,
+            "appraisal": {"appraisals": all_appraisals},
+        })
+        combined_result = {
+            "content": combined_content,
+            "member_responses": [],
+        }
+
+        if all_papers or all_appraisals:
+            status = "done"
+            if errors:
+                combined_result["warnings"] = errors
+        else:
+            status = "error"
+            combined_result["error"] = "; ".join(errors) if errors else "No output produced"
+
+        _pipeline_jobs[job_id] = {"status": status, "result": combined_result}
+        logger.info(
+            "Pipeline job %s finished: %d papers, %d appraisals, %d error(s)",
+            job_id, len(all_papers), len(all_appraisals), len(errors),
+        )
 
 
 async def _run_index_bg(job_id: str, pdf_path: str) -> None:
@@ -273,14 +445,9 @@ async def pipeline_run_async(body: dict):
     session_id: str = body.get("session_id", "")
     if not markdown_files:
         raise HTTPException(status_code=400, detail="markdown_files is required.")
-    message = (
-        f"Files: {', '.join(markdown_files)}\n\n"
-        "Extract structured evidence from ALL provided markdown files, "
-        "then perform REST quality appraisal on each paper."
-    )
     job_id = str(uuid.uuid4())
     _pipeline_jobs[job_id] = {"status": "running"}
-    asyncio.create_task(_run_pipeline_bg(job_id, message, user_id, session_id))
+    asyncio.create_task(_run_pipeline_bg(job_id, markdown_files, user_id, session_id))
     return {"job_id": job_id, "status": "running"}
 
 

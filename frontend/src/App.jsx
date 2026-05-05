@@ -16,6 +16,7 @@ import {
   getToken,
   clearToken,
   uploadFiles,
+  startPipelineJob,
   startPipelineBatch,
   pollPipelineJob,
   getPipelineResult,
@@ -137,108 +138,144 @@ export default function App() {
     }
   }, [files]);
 
-  // --- Pipeline run phase (per-document batch) ---
+  // --- Pipeline run phase ---
+  // Single file  → /pipeline/run        — one combined job, original fast path
+  // Multiple files → /pipeline/run-batch — one independent BullMQ job per file
+  //   Each file's result is stored separately in the DB and accessible from Run
+  //   History. The result page shows only the LAST document to finish; the rest
+  //   are found in Run History.
+  //   FastAPI-level semaphore (MAX_CONCURRENT_PIPELINES) prevents Bedrock overload
+  //   regardless of how many BullMQ jobs start concurrently.
   const handleRun = useCallback(async () => {
     setPhase('running');
     setErrorMsg('');
     const startTs = Date.now();
+    const isSingleFile = markdownFiles.length === 1;
 
     try {
-      // 1. Submit one job per file
-      const batchJobs = await startPipelineBatch(markdownFiles);
+      if (isSingleFile) {
+        // ── Single-file path ──────────────────────────────────────────────────
+        const jobId = await startPipelineJob(markdownFiles);
+        setCurrentJobId(jobId);
+        setDocStatuses([{
+          jobId,
+          fileName: markdownFiles[0],
+          displayName: toDisplayName(markdownFiles[0]),
+          status: 'queued',
+          progress: 0,
+          error: null,
+        }]);
 
-      // 2. Initialise per-doc status list
-      const initial = batchJobs.map((j) => ({
-        jobId: j.jobId,
-        fileName: j.fileName,
-        displayName: toDisplayName(j.fileName),
-        status: 'queued',
-        progress: 0,
-        error: null,
-      }));
-      setDocStatuses(initial);
-      // Keep first jobId for the download tab fallback
-      setCurrentJobId(batchJobs[0]?.jobId ?? null);
+        const POLL_INTERVAL = 6_000;
+        const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+        let lastJob = { status: 'queued', progress: 0 };
 
-      // 3. Poll all jobs concurrently until every one is terminal
-      const POLL_INTERVAL = 6_000;
-      const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
-
-      // mutable tracker so closures always see latest
-      const tracker = initial.map((d) => ({ ...d }));
-
-      while (tracker.some((d) => !terminalStatuses.has(d.status))) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-
-        await Promise.all(
-          tracker.map(async (doc, i) => {
-            if (terminalStatuses.has(doc.status)) return;
-            try {
-              const job = await pollPipelineJob(doc.jobId);
-              tracker[i] = {
-                ...tracker[i],
-                status: job.status,
-                progress: job.progress ?? tracker[i].progress,
-                error: job.error ?? null,
-              };
-            } catch {
-              // network hiccup — keep last known status
-            }
-          }),
-        );
-
-        // Push updated statuses into React state
-        setDocStatuses(tracker.map((d) => ({ ...d })));
-      }
-
-      // 4. Collect results from all completed jobs
-      setElapsedMs(Date.now() - startTs);
-
-      const allPapers = [];
-      const allAppraisals = [];
-      const allMetrics = [];
-
-      for (const doc of tracker) {
-        if (doc.status !== 'completed') continue;
-        try {
-          const raw = await getPipelineResult(doc.jobId);
-          const parsed = findParsedResult(raw);
-          if (parsed?.papers) allPapers.push(...parsed.papers);
-          if (parsed?.appraisal?.appraisals) allAppraisals.push(...parsed.appraisal.appraisals);
-          if (parsed?.appraisals) allAppraisals.push(...parsed.appraisals);
-          allMetrics.push(sumMetrics(raw));
-        } catch {
-          // result fetch failed for this doc — skip
+        while (!terminalStatuses.has(lastJob.status)) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+          try {
+            lastJob = await pollPipelineJob(jobId);
+            setDocStatuses([{
+              jobId,
+              fileName: markdownFiles[0],
+              displayName: toDisplayName(markdownFiles[0]),
+              status: terminalStatuses.has(lastJob.status) ? lastJob.status : 'active',
+              progress: lastJob.progress ?? 0,
+              error: lastJob.error ?? null,
+            }]);
+          } catch { /* network hiccup — keep polling */ }
         }
-      }
 
-      // 5. Aggregate metrics across all jobs
-      const mergedMetrics = allMetrics.reduce(
-        (acc, m) => ({
-          input_tokens: (acc.input_tokens ?? 0) + (m.input_tokens ?? 0),
-          output_tokens: (acc.output_tokens ?? 0) + (m.output_tokens ?? 0),
-          total_tokens: (acc.total_tokens ?? 0) + (m.total_tokens ?? 0),
-          cost_usd: (acc.cost_usd ?? 0) + (m.cost_usd ?? 0),
-          by_model: { ...acc.by_model, ...m.by_model },
-        }),
-        {},
-      );
-      setMetrics(mergedMetrics);
+        setElapsedMs(Date.now() - startTs);
+        if (lastJob.status === 'failed') throw new Error(lastJob.error || 'Pipeline failed.');
 
-      if (allPapers.length > 0 || allAppraisals.length > 0) {
-        setResults({ papers: allPapers, appraisal: { appraisals: allAppraisals } });
-        setPhase('done');
-        setActiveTab('evidence');
+        const raw = await getPipelineResult(jobId);
+        const parsed = findParsedResult(raw);
+        setMetrics(sumMetrics(raw));
+        if (parsed) {
+          setResults(parsed);
+          setPhase('done');
+          setActiveTab('evidence');
+        } else {
+          setResults({ papers: [], appraisal: { appraisals: [] }, _raw: raw?.content });
+          setPhase('done');
+          setErrorMsg('Pipeline completed but the response could not be parsed into structured data.');
+        }
+
+      } else {
+        // ── Multi-file path — one independent BullMQ job per file ────────────
+        const batchJobs = await startPipelineBatch(markdownFiles);
+
+        const initial = batchJobs.map((j) => ({
+          jobId: j.jobId,
+          fileName: j.fileName,
+          displayName: toDisplayName(j.fileName),
+          status: 'queued',
+          progress: 0,
+          error: null,
+          completedAt: null,   // track order of completion
+        }));
+        setDocStatuses(initial);
+        setCurrentJobId(batchJobs[0]?.jobId ?? null);
+
+        const POLL_INTERVAL = 6_000;
+        const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+        const tracker = initial.map((d) => ({ ...d }));
+
+        while (tracker.some((d) => !terminalStatuses.has(d.status))) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+          await Promise.all(
+            tracker.map(async (doc, i) => {
+              if (terminalStatuses.has(doc.status)) return;
+              try {
+                const job = await pollPipelineJob(doc.jobId);
+                const justCompleted = job.status === 'completed' && tracker[i].status !== 'completed';
+                tracker[i] = {
+                  ...tracker[i],
+                  status: job.status,
+                  progress: job.progress ?? tracker[i].progress,
+                  error: job.error ?? null,
+                  completedAt: justCompleted ? Date.now() : tracker[i].completedAt,
+                };
+              } catch { /* network hiccup */ }
+            }),
+          );
+          setDocStatuses(tracker.map((d) => ({ ...d })));
+        }
+
+        setElapsedMs(Date.now() - startTs);
+
+        // Find the last document to finish (highest completedAt timestamp)
+        const completed = tracker
+          .filter((d) => d.status === 'completed')
+          .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+
+        if (completed.length === 0) {
+          throw new Error('All documents failed to process.');
+        }
+
+        // Show only the last-to-finish result on the page.
+        // All completed jobs are already in the DB and will appear in Run History.
+        const lastFinished = completed[0];
+        const raw = await getPipelineResult(lastFinished.jobId);
+        const parsed = findParsedResult(raw);
+        setCurrentJobId(lastFinished.jobId);
+        setMetrics(sumMetrics(raw));
 
         const failedCount = tracker.filter((d) => d.status === 'failed').length;
-        if (failedCount > 0) {
-          setErrorMsg(`${failedCount} document(s) failed to process. Results shown for the remaining documents.`);
+        if (parsed) {
+          setResults(parsed);
+          setPhase('done');
+          setActiveTab('evidence');
+          if (failedCount > 0) {
+            setErrorMsg(`${failedCount} document(s) failed. Showing result for "${lastFinished.displayName}". Others are in Run History.`);
+          } else if (completed.length > 1) {
+            setErrorMsg(`Showing result for "${lastFinished.displayName}" (last to finish). Open Run History to see the other ${completed.length - 1} result(s).`);
+          }
+        } else {
+          setResults({ papers: [], appraisal: { appraisals: [] } });
+          setPhase('done');
+          setErrorMsg('Pipeline completed but the response could not be parsed into structured data.');
         }
-      } else {
-        // All failed
-        setResults({ papers: [], appraisal: { appraisals: [] } });
-        setPhase('done');
-        setErrorMsg('All documents failed to process. Please check your files and try again.');
       }
     } catch (err) {
       setElapsedMs(Date.now() - startTs);
