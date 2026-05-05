@@ -445,6 +445,7 @@ export default function App() {
                 phase={phase}
                 onUpload={handleUpload}
                 onRun={handleRun}
+                maxFiles={3}
               />
             </div>
           )}

@@ -7,7 +7,7 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function UploadZone({ files, onFilesChange, phase, onUpload, onRun }) {
+export default function UploadZone({ files, onFilesChange, phase, onUpload, onRun, maxFiles = 3 }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
 
@@ -17,10 +17,18 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
         (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
       );
       if (!pdfs.length) return;
+
       // Deduplicate by name
       const existing = new Set(files.map((f) => f.name));
-      const newFiles = pdfs.filter((f) => !existing.has(f.name));
-      onFilesChange([...files, ...newFiles]);
+      const filtered = pdfs.filter((f) => !existing.has(f.name));
+
+      if (files.length + filtered.length > maxFiles) {
+        alert(`You can only upload up to ${maxFiles} documents at once. Extra files were ignored.`);
+        const allowed = filtered.slice(0, maxFiles - files.length);
+        if (allowed.length) onFilesChange([...files, ...allowed]);
+      } else {
+        onFilesChange([...files, ...filtered]);
+      }
     },
     [files, onFilesChange]
   );
@@ -97,7 +105,7 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
               {dragging ? 'Release to add files' : 'Drop PDFs here or click to browse'}
             </p>
             <p className="text-gray-400 text-xs">
-              Supports PDF files only — multiple files allowed
+              Supports PDF files only — max {maxFiles} files at once
             </p>
           </div>
         </div>
