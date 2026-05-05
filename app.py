@@ -252,135 +252,145 @@ async def _run_one_file(
 
 async def _run_pipeline_bg(job_id: str, markdown_files: list[str], user_id: str, session_id: str) -> None:
     """
-    Run the evidence pipeline for a job, processing files one-at-a-time.
+    Run the evidence pipeline for a job, processing files concurrently.
 
-    WHY sequential, not parallel:
-    - Each file's pipeline makes 3+ Bedrock API calls (team + extraction + appraisal).
-    - Running N files in parallel = N×3 simultaneous Bedrock calls → rate-limit throttling.
-    - Running them sequentially means at most 3 Bedrock calls at a time, regardless of N.
-    - Each file's agents only see ONE paper in their context window, so token limits
-      can never be hit no matter how large or how many the documents are.
+    Each file's result is stored as the FULL _serialize_run output — including
+    member_responses, which carry per-agent metrics (tokens, cost). The frontend's
+    findParsedResult and sumMetrics traverse this tree and handle everything.
 
-    WHY a semaphore on top of sequential:
-    - Multiple users submit jobs concurrently.
-    - The semaphore (MAX_CONCURRENT_PIPELINES, default 2) ensures at most 2 users'
-      jobs run simultaneously at the FastAPI level. Further jobs wait in asyncio
-      without blocking the event loop. BullMQ retains the durable job queue.
+    Multi-user safety:
+    - MAX_CONCURRENT_PIPELINES semaphore: caps how many users' jobs run at once.
+    - FILE_CONCURRENCY semaphore: caps files processed in parallel within one job.
+    - Each file gets its own fresh Team + agent instances (no shared state).
     """
+    import json, re
+
     sem = _get_pipeline_semaphore()
     async with sem:
-        logger.info(
-            "Pipeline job %s: processing %d file(s) concurrently (user=%s)",
-            job_id, len(markdown_files), user_id,
-        )
-        all_papers: list = []
-        all_appraisals: list = []
-        errors: list[str] = []
-
-        import json, re
-
-        # How many files to process simultaneously within this job.
-        # Each file's pipeline calls Bedrock sequentially (team → extraction → appraisal),
-        # so FILE_CONCURRENCY=3 means at most ~3 Bedrock calls in-flight at once —
-        # one per file, each at a different stage of its own pipeline.
-        # Tune via FILE_CONCURRENCY env var if you hit Bedrock rate limits.
         file_concurrency = int(os.getenv("FILE_CONCURRENCY", "3"))
         file_sem = asyncio.Semaphore(file_concurrency)
-
-        def _extract_json(raw: dict) -> dict | None:
-            """Pull the first valid JSON block containing 'papers' from a run result."""
-            content = raw.get("content", "")
-            try:
-                d = json.loads(content.strip())
-                if "papers" in d:
-                    return d
-            except Exception:
-                pass
-            stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
-            try:
-                d = json.loads(stripped)
-                if "papers" in d:
-                    return d
-            except Exception:
-                pass
-            for member in raw.get("member_responses", []):
-                mc = member.get("content", "")
-                try:
-                    d = json.loads(mc.strip())
-                    if "papers" in d:
-                        return d
-                except Exception:
-                    pass
-                stripped_mc = re.sub(r"```(?:json)?\s*|```", "", mc).strip()
-                try:
-                    d = json.loads(stripped_mc)
-                    if "papers" in d:
-                        return d
-                except Exception:
-                    pass
-            return None
+        logger.info(
+            "Pipeline job %s: processing %d file(s), concurrency=%d (user=%s)",
+            job_id, len(markdown_files), file_concurrency, user_id,
+        )
 
         async def _process_one(i: int, md_filename: str):
-            """Process a single file, bounded by file_sem."""
             async with file_sem:
                 logger.info(
                     "Pipeline job %s: starting file %d/%d — %s",
                     job_id, i + 1, len(markdown_files), md_filename,
                 )
-                raw = await _run_one_file(md_filename, user_id, session_id)
-                return md_filename, _extract_json(raw)
+                # Returns the full _serialize_run dict: content + member_responses + metrics
+                return md_filename, await _run_one_file(md_filename, user_id, session_id)
 
-        # Run all files concurrently (≤ file_concurrency at a time).
-        # asyncio.gather preserves input order so results[i] matches markdown_files[i].
-        # return_exceptions=True means one file failing never cancels the others.
         outcomes = await asyncio.gather(
             *[_process_one(i, f) for i, f in enumerate(markdown_files)],
             return_exceptions=True,
         )
+
+        # ── Single file: store the raw result directly ──────────────────────────
+        # The frontend's findParsedResult and sumMetrics traverse the full tree,
+        # so nothing is lost (member_responses, metrics, content all intact).
+        if len(markdown_files) == 1:
+            outcome = outcomes[0]
+            if isinstance(outcome, BaseException):
+                logger.error("Pipeline job %s failed: %s", job_id, outcome)
+                _pipeline_jobs[job_id] = {"status": "error", "error": str(outcome)}
+            else:
+                md_filename, raw = outcome
+                # Verify the result has usable content before marking done
+                content = raw.get("content", "")
+                has_content = bool(content and content.strip())
+                # Also check member_responses for content
+                if not has_content:
+                    for m in raw.get("member_responses", []):
+                        if m.get("content", "").strip():
+                            has_content = True
+                            break
+                if has_content:
+                    logger.info("Pipeline job %s done — file: %s", job_id, md_filename)
+                    _pipeline_jobs[job_id] = {"status": "done", "result": raw}
+                else:
+                    logger.error("Pipeline job %s: empty result for %s", job_id, md_filename)
+                    _pipeline_jobs[job_id] = {"status": "error", "error": f"No content returned for {md_filename}"}
+            return
+
+        # ── Multiple files: merge all results ──────────────────────────────────
+        # Collect papers + appraisals from each file's result.
+        # Also aggregate all member_responses so sumMetrics sees all agent metrics.
+        all_papers: list = []
+        all_appraisals: list = []
+        all_member_responses: list = []
+        errors: list[str] = []
+
+        def _find_papers_and_appraisals(node: dict):
+            """Recursively search a result node for papers and appraisals."""
+            papers, appraisals = [], []
+            candidates = []
+            content = node.get("content", "")
+            if content:
+                candidates.append(content)
+                stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
+                if stripped != content:
+                    candidates.append(stripped)
+            for m in node.get("member_responses", []):
+                mc = m.get("content", "")
+                if mc:
+                    candidates.append(mc)
+                    candidates.append(re.sub(r"```(?:json)?\s*|```", "", mc).strip())
+
+            for c in candidates:
+                try:
+                    d = json.loads(c.strip())
+                    if "papers" in d:
+                        papers.extend(d["papers"])
+                        appraisal_node = d.get("appraisal", d)
+                        appraisals.extend(appraisal_node.get("appraisals", []))
+                        break
+                except Exception:
+                    pass
+            return papers, appraisals
 
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
                 errors.append(str(outcome))
                 logger.error("Pipeline job %s: a file task raised — %s", job_id, outcome)
                 continue
-            md_filename, parsed = outcome
-            if parsed:
-                all_papers.extend(parsed.get("papers", []))
-                appraisal_node = parsed.get("appraisal", parsed)
-                all_appraisals.extend(appraisal_node.get("appraisals", []))
-                logger.info(
-                    "Pipeline job %s: file %s — extracted %d paper(s), %d appraisal(s)",
-                    job_id, md_filename,
-                    len(parsed.get("papers", [])),
-                    len(appraisal_node.get("appraisals", [])),
-                )
-            else:
-                errors.append(f"{md_filename}: could not parse agent output into structured JSON")
-                logger.warning("Pipeline job %s: no parseable JSON for %s", job_id, md_filename)
+            md_filename, raw = outcome
+            papers, appraisals = _find_papers_and_appraisals(raw)
+            all_papers.extend(papers)
+            all_appraisals.extend(appraisals)
+            all_member_responses.extend(raw.get("member_responses", []))
+            logger.info(
+                "Pipeline job %s: file %s — %d paper(s), %d appraisal(s)",
+                job_id, md_filename, len(papers), len(appraisals),
+            )
+            if not papers:
+                errors.append(f"{md_filename}: no papers extracted")
 
-        # Combine per-file results into the shape the frontend expects
         combined_content = json.dumps({
             "papers": all_papers,
             "appraisal": {"appraisals": all_appraisals},
         })
+        # Preserve all member_responses so sumMetrics can tally tokens/cost
         combined_result = {
             "content": combined_content,
-            "member_responses": [],
+            "member_responses": all_member_responses,
         }
 
         if all_papers or all_appraisals:
-            status = "done"
             if errors:
                 combined_result["warnings"] = errors
+            _pipeline_jobs[job_id] = {"status": "done", "result": combined_result}
         else:
-            status = "error"
             combined_result["error"] = "; ".join(errors) if errors else "No output produced"
+            _pipeline_jobs[job_id] = {"status": "error", "result": combined_result}
 
-        _pipeline_jobs[job_id] = {"status": status, "result": combined_result}
         logger.info(
             "Pipeline job %s finished: %d papers, %d appraisals, %d error(s)",
             job_id, len(all_papers), len(all_appraisals), len(errors),
         )
+
 
 
 async def _run_index_bg(job_id: str, pdf_path: str) -> None:
