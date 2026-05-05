@@ -164,7 +164,7 @@ def _get_pipeline_semaphore() -> asyncio.Semaphore:
     """Lazily create the semaphore inside the running event loop."""
     global _pipeline_semaphore
     if _pipeline_semaphore is None:
-        limit = int(os.getenv("MAX_CONCURRENT_PIPELINES", "2"))
+        limit = int(os.getenv("MAX_CONCURRENT_PIPELINES", "3"))
         _pipeline_semaphore = asyncio.Semaphore(limit)
         logger.info("Pipeline concurrency limit set to %d", limit)
     return _pipeline_semaphore
