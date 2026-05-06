@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, ArrayMinSize, ArrayMaxSize } from 'class-validator';
+import { IsArray, IsString, ArrayMinSize, ArrayMaxSize, IsIn, IsOptional } from 'class-validator';
 
 export class RunPipelineDto {
   @ApiProperty({
@@ -11,4 +11,15 @@ export class RunPipelineDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(5)
   markdownFiles: string[];
+
+  @ApiProperty({
+    description: 'Pipeline steps to run. Defaults to both extraction and appraisal.',
+    example: ['extraction', 'appraisal'],
+    required: false,
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn(['extraction', 'appraisal'], { each: true })
+  steps?: string[];
 }

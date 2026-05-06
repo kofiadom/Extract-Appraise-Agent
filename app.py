@@ -9,7 +9,6 @@ Run:
 AgentOS endpoints:
     POST /agents/fs-extraction-agent/runs    -> Run extraction agent directly
     POST /agents/fs-appraisal-agent/runs     -> Run appraisal agent directly
-    POST /teams/fs-evidence-team/runs        -> Run full pipeline (extract → appraise)
     POST /agents/pageindex-chat-agent/runs   -> Chat with an indexed document (PageIndex)
 
 Custom endpoints:
@@ -27,8 +26,10 @@ Required .env vars for Chat with Doc:
 """
 
 import asyncio
+import json
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -45,10 +46,7 @@ from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from agno.db.postgres import PostgresDb
-from agno.models.aws import AwsBedrock
 from agno.os import AgentOS
-from agno.team import Team
-from agno.team.mode import TeamMode
 
 from agents.extraction_agent import create_filesearch_extraction_agent, EXTRACTION_PROMPT_FS
 from agents.appraisal_agent import create_filesearch_appraisal_agent, APPRAISAL_STANDALONE_PROMPT_FS
@@ -127,37 +125,21 @@ appraisal_agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID, db=postg
 # ── PageIndex chat agent (registered with AgentOS — uses /agents/pageindex-chat-agent/runs)
 chat_agent = create_chat_agent(get_pageindex_client, DEFAULT_MODEL_ID, db=postgres_db)
 
-evidence_team = Team(
-    id="fs-evidence-team",
-    name="FileSearch Evidence & Appraisal Team",
-    model=AwsBedrock(id=DEFAULT_MODEL_ID),
-    mode=TeamMode.coordinate,
-    members=[extraction_agent, appraisal_agent],
-    instructions=[
-        "You coordinate a two-step evidence synthesis pipeline using pre-converted markdown files.",
-        "The user's message contains the markdown filename(s) to process (e.g. 'study.md').",
-        f"Step 1 — Delegate to the FileSearch Extraction Agent. Pass the file path(s) and use this exact prompt:\n{EXTRACTION_PROMPT_FS}",
-        f"Step 2 — Delegate to the FileSearch Appraisal Agent. Pass the file path(s) and use this exact prompt:\n{APPRAISAL_STANDALONE_PROMPT_FS}",
-        "Step 3 — Combine both outputs into one JSON object. Copy every field verbatim — do NOT rename, drop, or summarise any field. Output ONLY this JSON, no prose, no markdown fences:\n"
-        '{"papers": [<exact array from FileSearch Extraction Agent>], "appraisal": {"appraisals": [<exact array from FileSearch Appraisal Agent>]}}',
-    ],
-    markdown=False,
-)
 
-# ── Async pipeline jobs ────────────────────────────────────────────────────────
 _pipeline_jobs: dict = {}
 
-# ── Async indexing jobs ────────────────────────────────────────────────────────
 _index_jobs: dict = {}
 
 # ── Concurrent pipeline limiter ────────────────────────────────────────────────
-# Each pipeline job makes several sequential Bedrock API calls (team coordinator,
-# extraction agent, appraisal agent). Allowing too many to run concurrently causes
+# Each pipeline job can make multiple Bedrock API calls for extraction and appraisal.
+# Allowing too many to run concurrently causes
 # AWS Bedrock rate-limit throttling across all users. This semaphore caps the number
 # of active pipeline runs; additional jobs wait in the asyncio queue until a slot
 # opens. BullMQ already queues jobs durably, so no work is lost.
-# Override with the MAX_CONCURRENT_PIPELINES env var (default: 2).
+# Override with the MAX_CONCURRENT_PIPELINES env var (default: 3).
 _pipeline_semaphore: asyncio.Semaphore | None = None
+
+VALID_PIPELINE_STEPS = {"extraction", "appraisal"}
 
 
 def _get_pipeline_semaphore() -> asyncio.Semaphore:
@@ -205,52 +187,146 @@ def _serialize_run(node) -> dict:
     }
 
 
-async def _run_one_file(
-    md_filename: str,
-    user_id: str,
-    session_id: str,
-) -> dict:
-    """
-    Run the full extraction + appraisal pipeline for a SINGLE markdown file.
+def _normalize_pipeline_steps(steps) -> list[str]:
+    """Validate requested pipeline steps while preserving default behavior."""
+    if not steps:
+        return ["extraction", "appraisal"]
+    if isinstance(steps, str):
+        steps = [steps]
+    normalized = []
+    for step in steps:
+        step_name = str(step).strip().lower()
+        if step_name not in VALID_PIPELINE_STEPS:
+            raise ValueError(f"Invalid pipeline step: {step}")
+        if step_name not in normalized:
+            normalized.append(step_name)
+    if not normalized:
+        raise ValueError("At least one pipeline step is required.")
+    return normalized
 
-    Each call creates its own fresh Team + agent instances and sends a message
-    that references only one file. This keeps the agent context window bounded
-    to one paper regardless of how many files the user uploaded, preventing
-    token-limit failures on large documents.
-    """
-    job_extraction_agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID, db=postgres_db)
-    job_appraisal_agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID, db=postgres_db)
-    file_team = Team(
-        id=f"fs-evidence-team-{session_id}-{md_filename}",
-        name="FileSearch Evidence & Appraisal Team",
-        model=AwsBedrock(id=DEFAULT_MODEL_ID),
-        mode=TeamMode.coordinate,
-        members=[job_extraction_agent, job_appraisal_agent],
-        instructions=[
-            "You coordinate a two-step evidence synthesis pipeline using pre-converted markdown files.",
-            "The user's message contains the markdown filename to process (e.g. 'study.md').",
-            f"Step 1 — Delegate to the FileSearch Extraction Agent. Pass the file path and use this exact prompt:\n{EXTRACTION_PROMPT_FS}",
-            f"Step 2 — Delegate to the FileSearch Appraisal Agent. Pass the file path and use this exact prompt:\n{APPRAISAL_STANDALONE_PROMPT_FS}",
-            "Step 3 — Combine both outputs into one JSON object. Copy every field verbatim — do NOT rename, drop, or summarise any field. Output ONLY this JSON, no prose, no markdown fences:\n"
-            '{"papers": [<exact array from FileSearch Extraction Agent>], "appraisal": {"appraisals": [<exact array from FileSearch Appraisal Agent>]}}',
-        ],
-        markdown=False,
-    )
-    single_file_message = (
+
+def _json_candidates_from_result(node: dict):
+    """Yield possible JSON payloads from a serialized Agno result tree."""
+    if not node:
+        return
+    content = node.get("content", "")
+    if isinstance(content, (dict, list)):
+        yield content
+    elif content:
+        yield content
+        yield re.sub(r"```(?:json)?\s*|```", "", content).strip()
+    for member in node.get("member_responses", []) or []:
+        yield from _json_candidates_from_result(member)
+
+
+def _extract_papers_and_appraisals(node: dict) -> tuple[list, list]:
+    """Extract papers/appraisals from any JSON payload in a result tree."""
+    papers, appraisals = [], []
+    for candidate in _json_candidates_from_result(node):
+        try:
+            data = candidate if isinstance(candidate, (dict, list)) else json.loads(str(candidate).strip())
+        except Exception:
+            continue
+        if isinstance(data, list):
+            continue
+        if "papers" in data and isinstance(data["papers"], list):
+            papers.extend(data["papers"])
+        appraisal_node = data.get("appraisal", data)
+        if isinstance(appraisal_node, dict) and isinstance(appraisal_node.get("appraisals"), list):
+            appraisals.extend(appraisal_node["appraisals"])
+    return papers, appraisals
+
+
+async def _run_extraction_file(md_filename: str, user_id: str, session_id: str) -> dict:
+    """Run the extraction agent directly for one markdown file."""
+    agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID, db=postgres_db)
+    message = (
         f"File: {md_filename}\n\n"
-        "Extract structured evidence from this markdown file, "
-        "then perform REST quality appraisal on the paper."
+        f"{EXTRACTION_PROMPT_FS}"
     )
-    response = await file_team.arun(
-        single_file_message,
+    response = await agent.arun(
+        message,
         user_id=user_id,
-        session_id=f"{session_id}-{md_filename}",
+        session_id=f"{session_id}-{md_filename}-extraction",
         stream=False,
     )
     return _serialize_run(response)
 
 
-async def _run_pipeline_bg(job_id: str, markdown_files: list[str], user_id: str, session_id: str) -> None:
+async def _run_appraisal_file(md_filename: str, user_id: str, session_id: str) -> dict:
+    """Run the appraisal agent directly for one markdown file."""
+    agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID, db=postgres_db)
+    message = (
+        f"File: {md_filename}\n\n"
+        f"{APPRAISAL_STANDALONE_PROMPT_FS}"
+    )
+    response = await agent.arun(
+        message,
+        user_id=user_id,
+        session_id=f"{session_id}-{md_filename}-appraisal",
+        stream=False,
+    )
+    return _serialize_run(response)
+
+
+async def _run_one_file_direct(
+    md_filename: str,
+    user_id: str,
+    session_id: str,
+    steps: list[str],
+) -> dict:
+    """
+    Run requested agents for one file.
+
+    Extraction and appraisal are independent Agno agent runs and execute in
+    true parallel when both steps are requested.
+    """
+    runners = []
+    if "extraction" in steps:
+        runners.append(("extraction", _run_extraction_file(md_filename, user_id, session_id)))
+    if "appraisal" in steps:
+        runners.append(("appraisal", _run_appraisal_file(md_filename, user_id, session_id)))
+
+    outcomes = await asyncio.gather(*(runner for _, runner in runners), return_exceptions=True)
+
+    papers: list = []
+    appraisals: list = []
+    member_responses: list = []
+    errors: list[str] = []
+
+    for (step, _), outcome in zip(runners, outcomes):
+        if isinstance(outcome, BaseException):
+            logger.error("Pipeline step failed for %s (%s): %s", md_filename, step, outcome)
+            errors.append(f"{step}: {outcome}")
+            continue
+        member_responses.append(outcome)
+        step_papers, step_appraisals = _extract_papers_and_appraisals(outcome)
+        papers.extend(step_papers)
+        appraisals.extend(step_appraisals)
+
+    if errors and not papers and not appraisals:
+        raise RuntimeError("; ".join(errors))
+
+    combined_content = json.dumps({
+        "papers": papers,
+        "appraisal": {"appraisals": appraisals},
+    })
+    combined_result = {
+        "content": combined_content,
+        "member_responses": member_responses,
+    }
+    if errors:
+        combined_result["warnings"] = errors
+    return combined_result
+
+
+async def _run_pipeline_bg(
+    job_id: str,
+    markdown_files: list[str],
+    user_id: str,
+    session_id: str,
+    steps: list[str] | None = None,
+) -> None:
     """
     Run the evidence pipeline for a job, processing files concurrently.
 
@@ -261,17 +337,16 @@ async def _run_pipeline_bg(job_id: str, markdown_files: list[str], user_id: str,
     Multi-user safety:
     - MAX_CONCURRENT_PIPELINES semaphore: caps how many users' jobs run at once.
     - FILE_CONCURRENCY semaphore: caps files processed in parallel within one job.
-    - Each file gets its own fresh Team + agent instances (no shared state).
+    - Each file gets fresh agent instances (no shared state).
     """
-    import json, re
-
     sem = _get_pipeline_semaphore()
+    steps = _normalize_pipeline_steps(steps)
     async with sem:
         file_concurrency = int(os.getenv("FILE_CONCURRENCY", "3"))
         file_sem = asyncio.Semaphore(file_concurrency)
         logger.info(
-            "Pipeline job %s: processing %d file(s), concurrency=%d (user=%s)",
-            job_id, len(markdown_files), file_concurrency, user_id,
+            "Pipeline job %s: processing %d file(s), concurrency=%d, steps=%s (user=%s)",
+            job_id, len(markdown_files), file_concurrency, steps, user_id,
         )
 
         async def _process_one(i: int, md_filename: str):
@@ -280,8 +355,7 @@ async def _run_pipeline_bg(job_id: str, markdown_files: list[str], user_id: str,
                     "Pipeline job %s: starting file %d/%d — %s",
                     job_id, i + 1, len(markdown_files), md_filename,
                 )
-                # Returns the full _serialize_run dict: content + member_responses + metrics
-                return md_filename, await _run_one_file(md_filename, user_id, session_id)
+                return md_filename, await _run_one_file_direct(md_filename, user_id, session_id, steps)
 
         outcomes = await asyncio.gather(
             *[_process_one(i, f) for i, f in enumerate(markdown_files)],
@@ -357,7 +431,7 @@ async def _run_pipeline_bg(job_id: str, markdown_files: list[str], user_id: str,
                 logger.error("Pipeline job %s: a file task raised — %s", job_id, outcome)
                 continue
             md_filename, raw = outcome
-            papers, appraisals = _find_papers_and_appraisals(raw)
+            papers, appraisals = _extract_papers_and_appraisals(raw)
             all_papers.extend(papers)
             all_appraisals.extend(appraisals)
             all_member_responses.extend(raw.get("member_responses", []))
@@ -419,7 +493,7 @@ app = FastAPI(
     title="REST Evidence Extractor",
     description=(
         "Upload PDFs via POST /upload-fs (converted to markdown via LlamaParse), "
-        "then run POST /teams/fs-evidence-team/runs to extract evidence and appraise quality."
+        "then run POST /pipeline/run-async to extract evidence and appraise quality."
     ),
     version="1.0.0",
     root_path=ROOT_PATH,
@@ -453,11 +527,15 @@ async def pipeline_run_async(body: dict):
     markdown_files: list[str] = body.get("markdown_files", [])
     user_id: str = body.get("user_id", "")
     session_id: str = body.get("session_id", "")
+    try:
+        steps = _normalize_pipeline_steps(body.get("steps"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not markdown_files:
         raise HTTPException(status_code=400, detail="markdown_files is required.")
     job_id = str(uuid.uuid4())
     _pipeline_jobs[job_id] = {"status": "running"}
-    asyncio.create_task(_run_pipeline_bg(job_id, markdown_files, user_id, session_id))
+    asyncio.create_task(_run_pipeline_bg(job_id, markdown_files, user_id, session_id, steps))
     return {"job_id": job_id, "status": "running"}
 
 
@@ -609,7 +687,6 @@ async def chat_remove_document(doc_id: str):
 agent_os = AgentOS(
     name="REST Evidence Extractor",
     agents=[extraction_agent, appraisal_agent, chat_agent],
-    teams=[evidence_team],
     base_app=app,
 )
 

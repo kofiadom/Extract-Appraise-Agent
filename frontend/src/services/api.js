@@ -70,8 +70,8 @@ export async function uploadFiles(files) {
 }
 
 /** Legacy: submit all files in one job. */
-export async function startPipelineJob(markdownFiles) {
-  const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles });
+export async function startPipelineJob(markdownFiles, steps) {
+  const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles, steps });
   return data.data.jobId;
 }
 
@@ -79,8 +79,8 @@ export async function startPipelineJob(markdownFiles) {
  * Submit one independent pipeline job per file.
  * Returns an array of { jobId, fileName, status } objects.
  */
-export async function startPipelineBatch(markdownFiles) {
-  const { data } = await api.post('/api/v1/pipeline/run-batch', { markdownFiles });
+export async function startPipelineBatch(markdownFiles, steps) {
+  const { data } = await api.post('/api/v1/pipeline/run-batch', { markdownFiles, steps });
   return data.data; // [{ jobId, fileName, status }, ...]
 }
 

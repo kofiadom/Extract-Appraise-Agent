@@ -10,11 +10,12 @@ export class PipelineService {
   async runPipeline(
     userId: string,
     markdownFiles: string[],
+    steps?: string[],
   ): Promise<{ jobId: string; status: string }> {
     return this.jobsService.submitJob({
       userId,
       jobType: JOB_TYPES.PAPER_PIPELINE,
-      data: { markdownFiles },
+      data: { markdownFiles, steps },
     });
   }
 
@@ -26,13 +27,14 @@ export class PipelineService {
   async runPipelineForFiles(
     userId: string,
     markdownFiles: string[],
+    steps?: string[],
   ): Promise<{ jobId: string; fileName: string; status: string }[]> {
     const jobs = await Promise.all(
       markdownFiles.map(async (fileName) => {
         const { jobId, status } = await this.jobsService.submitJob({
           userId,
           jobType: JOB_TYPES.PAPER_PIPELINE,
-          data: { markdownFiles: [fileName] },
+          data: { markdownFiles: [fileName], steps },
         });
         return { jobId, fileName, status };
       }),

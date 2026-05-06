@@ -54,12 +54,18 @@ export class FastApiService {
     }
   }
 
-  async startPipeline(markdownFiles: string[], userId: string, sessionId: string): Promise<string> {
+  async startPipeline(
+    markdownFiles: string[],
+    userId: string,
+    sessionId: string,
+    steps?: string[],
+  ): Promise<string> {
     try {
       const { data } = await this.http.post('/pipeline/run-async', {
         markdown_files: markdownFiles,
         user_id: userId,
         session_id: sessionId,
+        steps,
       });
       return data.job_id as string;
     } catch (error) {

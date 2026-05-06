@@ -58,12 +58,13 @@ export class BackgroundJobProcessor {
     const startTime = Date.now();
     const { jobId, userId, data } = job.data;
     const markdownFiles = data.markdownFiles as string[];
+    const steps = data.steps as string[] | undefined;
 
     this.logger.log(`Processing paper pipeline ${jobId} — ${markdownFiles.length} file(s)`);
     await this.jobRepo.update(jobId, { status: 'active', progress: 10 });
 
     try {
-      const fastapiJobId = await this.fastApi.startPipeline(markdownFiles, userId ?? '', jobId);
+      const fastapiJobId = await this.fastApi.startPipeline(markdownFiles, userId ?? '', jobId, steps);
       this.logger.log(`FastAPI pipeline started: ${fastapiJobId} (NestJS job: ${jobId})`);
       await this.jobRepo.update(jobId, { progress: 20 });
 

@@ -23,7 +23,7 @@ export class PipelineController {
   @ApiOperation({ summary: 'Start extraction + appraisal pipeline for uploaded papers (single job for all files)' })
   @ApiResponse({ status: 201, description: 'Pipeline job queued — poll /:jobId for status' })
   async run(@Body() body: RunPipelineDto, @CurrentUser() user: AuthUser) {
-    const result = await this.pipelineService.runPipeline(user.userId, body.markdownFiles);
+    const result = await this.pipelineService.runPipeline(user.userId, body.markdownFiles, body.steps);
     return { success: true, message: 'Pipeline job queued', data: result };
   }
 
@@ -31,7 +31,7 @@ export class PipelineController {
   @ApiOperation({ summary: 'Submit one independent pipeline job per file — returns array of {jobId, fileName}' })
   @ApiResponse({ status: 201, description: 'One job per file queued — poll each /:jobId independently' })
   async runBatch(@Body() body: RunPipelineDto, @CurrentUser() user: AuthUser) {
-    const jobs = await this.pipelineService.runPipelineForFiles(user.userId, body.markdownFiles);
+    const jobs = await this.pipelineService.runPipelineForFiles(user.userId, body.markdownFiles, body.steps);
     return { success: true, message: `${jobs.length} pipeline job(s) queued`, data: jobs };
   }
 
