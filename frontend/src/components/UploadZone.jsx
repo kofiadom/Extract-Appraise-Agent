@@ -118,7 +118,7 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
           <div className="text-center">
             <p className="text-blue-700 font-medium text-sm">Uploading files…</p>
             <p className="text-blue-500/70 text-xs mt-0.5">
-              Converting PDFs to markdown via LlamaParse
+              Extracting document data...
             </p>
           </div>
         </div>
