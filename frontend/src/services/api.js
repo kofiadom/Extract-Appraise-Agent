@@ -267,13 +267,29 @@ export async function deleteJob(jobId) {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
+/** True if a parsed object looks like a valid pipeline result with actual content. */
+function isResultPayload(d) {
+  if (!d || typeof d !== 'object') return false;
+  // If it's an array, it's not the top-level payload { papers, appraisal }
+  if (Array.isArray(d)) return false;
+
+  // Accept if it has non-empty papers array OR non-empty appraisal.appraisals array
+  // OR non-empty appraisals array. We must check .length > 0 to skip empty or partial
+  // blocks that some LLMs might output before the final result.
+  const hasPapers = Array.isArray(d.papers) && d.papers.length > 0;
+  const hasAppraisals = (Array.isArray(d.appraisal?.appraisals) && d.appraisal.appraisals.length > 0) ||
+                        (Array.isArray(d.appraisals) && d.appraisals.length > 0);
+
+  return hasPapers || hasAppraisals;
+}
+
 export function parseTeamContent(content) {
   if (!content) return null;
 
   // 1. Direct parse
   try {
     const d = JSON.parse(content.trim());
-    if (d?.papers) return d;
+    if (isResultPayload(d)) return d;
   } catch {}
 
   // 2. Strip markdown fences then parse
@@ -284,13 +300,13 @@ export function parseTeamContent(content) {
   if (stripped !== content.trim()) {
     try {
       const d = JSON.parse(stripped);
-      if (d?.papers) return d;
+      if (isResultPayload(d)) return d;
     } catch {}
   }
 
   // 3. String-aware brace scanner — finds every complete {...} block in order,
   //    skipping over quoted strings so braces inside values don't confuse depth.
-  //    Continues past blocks that don't contain 'papers' instead of stopping.
+  //    Continues past blocks that don't contain a result payload instead of stopping.
   let searchFrom = 0;
   while (searchFrom < content.length) {
     const blockStart = content.indexOf('{', searchFrom);
@@ -318,7 +334,7 @@ export function parseTeamContent(content) {
 
     try {
       const d = JSON.parse(content.slice(blockStart, blockEnd + 1));
-      if (d?.papers) return d;
+      if (isResultPayload(d)) return d;
     } catch {}
 
     searchFrom = blockStart + 1; // advance past this block's opening brace and keep scanning

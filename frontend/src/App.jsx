@@ -353,7 +353,12 @@ export default function App() {
     if (parsed) {
       setResults(parsed);
       setPhase('done');
-      setActiveTab('evidence');
+      // Set active tab based on what's available
+      const hasPapers = parsed.papers?.length > 0;
+      const hasAppraisals = (parsed.appraisal?.appraisals?.length > 0) || (parsed.appraisals?.length > 0);
+      if (hasPapers) setActiveTab('evidence');
+      else if (hasAppraisals) setActiveTab('appraisal');
+      else setActiveTab('evidence');
     } else {
       setResults({ papers: [], appraisal: { appraisals: [] }, _raw: raw?.content });
       setPhase('done');
