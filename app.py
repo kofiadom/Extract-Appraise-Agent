@@ -214,7 +214,9 @@ def _json_candidates_from_result(node: dict):
         yield content
     elif content:
         yield content
-        yield re.sub(r"```(?:json)?\s*|```", "", content).strip()
+        stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
+        if stripped != content:
+            yield stripped
     for member in node.get("member_responses", []) or []:
         yield from _json_candidates_from_result(member)
 
