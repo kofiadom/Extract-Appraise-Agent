@@ -7,9 +7,16 @@ import { PipelineJob } from '../../entities/pipeline-job.entity';
 import { IndexedDocument } from '../../entities/indexed-document.entity';
 import { QUEUE_NAMES } from '../../types';
 
-// Read from env so JOB_TIMEOUT in .env is actually respected.
-// Default: 600 000 ms (10 minutes) — enough for large multi-paper pipelines.
-const JOB_TIMEOUT_MS = parseInt(process.env.JOB_TIMEOUT ?? '600000', 10);
+// Bull's timeout must exceed the processor polling windows, otherwise Bull can
+// fail a healthy long-running job before the processor timeout is reached.
+const PIPELINE_MAX_WAIT_MS = parseInt(process.env.PIPELINE_MAX_WAIT_MS ?? `${15 * 60 * 1000}`, 10);
+const INDEX_MAX_WAIT_MS = parseInt(process.env.INDEX_MAX_WAIT_MS ?? `${5 * 60 * 1000}`, 10);
+const CONFIGURED_JOB_TIMEOUT_MS = parseInt(process.env.JOB_TIMEOUT ?? '0', 10);
+const JOB_TIMEOUT_MS = Math.max(
+  CONFIGURED_JOB_TIMEOUT_MS,
+  PIPELINE_MAX_WAIT_MS + 60_000,
+  INDEX_MAX_WAIT_MS + 60_000,
+);
 
 @Module({
   imports: [

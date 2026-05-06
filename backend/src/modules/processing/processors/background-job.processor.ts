@@ -11,6 +11,8 @@ import { FastApiService } from '../../fastapi/fastapi.service';
 // Allow up to WORKER_CONCURRENCY jobs to run simultaneously in this process.
 // Keep this in sync with MAX_CONCURRENT_DOCS in the FastAPI service.
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY ?? '3', 10);
+const PIPELINE_MAX_WAIT_MS = parseInt(process.env.PIPELINE_MAX_WAIT_MS ?? `${15 * 60 * 1000}`, 10);
+const INDEX_MAX_WAIT_MS = parseInt(process.env.INDEX_MAX_WAIT_MS ?? `${5 * 60 * 1000}`, 10);
 
 @Processor(QUEUE_NAMES.BACKGROUND_JOBS)
 export class BackgroundJobProcessor {
@@ -83,9 +85,8 @@ export class BackgroundJobProcessor {
     nestJobId: string,
     bullJob: Job,
   ): Promise<Record<string, unknown>> {
-    const maxWait = 9 * 60 * 1000;
     const pollInterval = 5_000;
-    const deadline = Date.now() + maxWait;
+    const deadline = Date.now() + PIPELINE_MAX_WAIT_MS;
     let progress = 20;
 
     while (Date.now() < deadline) {
@@ -97,7 +98,7 @@ export class BackgroundJobProcessor {
       await bullJob.progress(progress);
       await this.jobRepo.update(nestJobId, { progress });
     }
-    throw new Error(`Pipeline timed out after ${9 * 60}s`);
+    throw new Error(`Pipeline timed out after ${Math.round(PIPELINE_MAX_WAIT_MS / 1000)}s`);
   }
 
   // ─── Document indexing ─────────────────────────────────────────────────────
@@ -144,9 +145,8 @@ export class BackgroundJobProcessor {
     nestJobId: string,
     bullJob: Job,
   ) {
-    const maxWait = 5 * 60 * 1000; // indexing is faster than pipeline — 5 min cap
     const pollInterval = 4_000;
-    const deadline = Date.now() + maxWait;
+    const deadline = Date.now() + INDEX_MAX_WAIT_MS;
     let progress = 10;
 
     while (Date.now() < deadline) {
@@ -158,7 +158,7 @@ export class BackgroundJobProcessor {
       await bullJob.progress(progress);
       await this.jobRepo.update(nestJobId, { progress });
     }
-    throw new Error(`Document indexing timed out after ${5 * 60}s`);
+    throw new Error(`Document indexing timed out after ${Math.round(INDEX_MAX_WAIT_MS / 1000)}s`);
   }
 
   // ─── BullMQ failure hook ───────────────────────────────────────────────────

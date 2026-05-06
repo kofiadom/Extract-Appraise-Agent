@@ -14,11 +14,18 @@ export class FastApiService {
   private readonly logger = new Logger(FastApiService.name);
   private readonly http: AxiosInstance;
 
-  constructor(config: ConfigService) {
+  constructor(private readonly config: ConfigService) {
     this.http = axios.create({
-      baseURL: config.get<string>('FASTAPI_URL', 'http://localhost:8000'),
-      timeout: 30_000,
+      baseURL: this.config.get<string>('FASTAPI_URL', 'http://localhost:8000'),
+      timeout: this.getTimeout('FASTAPI_REQUEST_TIMEOUT_MS', 30_000),
     });
+  }
+
+  private getTimeout(envName: string, fallbackMs: number): number {
+    const raw = this.config.get<string>(envName);
+    if (!raw) return fallbackMs;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
   }
 
   // ─── Pipeline ────────────────────────────────────────────────────────────────
@@ -35,7 +42,7 @@ export class FastApiService {
     try {
       const { data } = await this.http.post('/upload-fs', form, {
         headers: form.getHeaders(),
-        timeout: 120_000,
+        timeout: this.getTimeout('FASTAPI_UPLOAD_TIMEOUT_MS', 10 * 60 * 1000),
       });
       return {
         files: (data.files as string[]) ?? [],
@@ -84,7 +91,7 @@ export class FastApiService {
     try {
       const { data } = await this.http.post('/chat/index-async', form, {
         headers: form.getHeaders(),
-        timeout: 60_000,
+        timeout: this.getTimeout('FASTAPI_INDEX_START_TIMEOUT_MS', 60_000),
       });
       return data.job_id as string;
     } catch (error) {
@@ -132,7 +139,7 @@ export class FastApiService {
       const { data } = await this.http.post(
         '/agents/pageindex-chat-agent/runs',
         form,
-        { timeout: 120_000 },
+        { timeout: this.getTimeout('FASTAPI_CHAT_TIMEOUT_MS', 120_000) },
       );
       return data as Record<string, unknown>;
     } catch (error) {
@@ -153,7 +160,7 @@ export class FastApiService {
       const { data } = await this.http.post(
         '/agents/pageindex-chat-agent/runs',
         form,
-        { responseType: 'stream', timeout: 120_000 },
+        { responseType: 'stream', timeout: this.getTimeout('FASTAPI_CHAT_TIMEOUT_MS', 120_000) },
       );
       return data;
     } catch (error) {
