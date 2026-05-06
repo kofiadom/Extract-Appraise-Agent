@@ -100,6 +100,18 @@ export class JobsService {
     return true;
   }
 
+  async deleteJob(jobId: string, userId: string): Promise<boolean> {
+    const job = await this.getJobStatus(jobId, userId);
+
+    // Remove from BullMQ if it exists there
+    const bullJob = await this.jobQueue.getJob(jobId);
+    if (bullJob) await bullJob.remove();
+
+    await this.jobRepo.delete(jobId);
+    this.logger.log(`Job deleted: ${jobId} by user: ${userId}`);
+    return true;
+  }
+
   /**
    * Delete all pipeline_job records for a user from the database.
    * Does NOT attempt to remove active Bull jobs from Redis — those will finish

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Clock, FileText, Loader2, ChevronDown, BookOpen, Trash2, AlertTriangle } from 'lucide-react';
-import { listJobs, getJobResultById, sumMetrics, clearHistory } from '../services/api.js';
+import { listJobs, getJobResultById, sumMetrics, clearHistory, deleteJob } from '../services/api.js';
 
 const LIMIT = 15;
 
@@ -18,6 +18,8 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingJobId, setLoadingJobId] = useState(null);
+  const [deletingJobId, setDeletingJobId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [error, setError] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -72,6 +74,20 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
     }
   }
 
+  async function handleDelete(jobId) {
+    setDeletingJobId(jobId);
+    try {
+      await deleteJob(jobId);
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+      setTotal((t) => t - 1);
+      setConfirmDeleteId(null);
+    } catch {
+      // User can retry
+    } finally {
+      setDeletingJobId(null);
+    }
+  }
+
   async function handleClear() {
     setClearing(true);
     try {
@@ -94,7 +110,10 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
         className={`fixed inset-0 z-[49] bg-black/40 transition-opacity duration-300 ${
           open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
-        onClick={onClose}
+        onClick={() => {
+          setConfirmDeleteId(null);
+          onClose();
+        }}
       />
 
       {/* Panel */}
@@ -114,7 +133,10 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
             <h2 className="text-white font-semibold text-sm">Run History</h2>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              setConfirmDeleteId(null);
+              onClose();
+            }}
             className="text-white/50 hover:text-white transition-colors p-1 rounded"
           >
             <X size={16} />
@@ -207,7 +229,11 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
                   key={job.id}
                   job={job}
                   onView={handleView}
+                  onDelete={handleDelete}
+                  confirmDelete={confirmDeleteId === job.id}
+                  setConfirmDelete={(id) => setConfirmDeleteId(id)}
                   isLoading={loadingJobId === job.id}
+                  isDeleting={deletingJobId === job.id}
                 />
               ))}
 
@@ -233,13 +259,13 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
   );
 }
 
-function JobCard({ job, onView, isLoading }) {
+function JobCard({ job, onView, onDelete, confirmDelete, setConfirmDelete, isLoading, isDeleting }) {
   const files = (job.inputData?.markdownFiles ?? []).map(formatFileName);
   const primary = files[0] ?? 'Unknown file';
   const extra = files.length - 1;
 
   return (
-    <div className="border border-gray-100 rounded-xl p-4 hover:border-gray-200 hover:shadow-sm transition-all bg-white">
+    <div className="border border-gray-100 rounded-xl p-4 hover:border-gray-200 hover:shadow-sm transition-all bg-white group">
       {/* File name row */}
       <div className="flex items-start gap-2.5 mb-3">
         <FileText size={14} className="text-gray-400 flex-shrink-0 mt-0.5" />
@@ -253,7 +279,36 @@ function JobCard({ job, onView, isLoading }) {
             </p>
           )}
         </div>
-        <StatusBadge status={job.status} />
+        <div className="flex items-center gap-2">
+          {!confirmDelete && <StatusBadge status={job.status} />}
+          
+          {confirmDelete ? (
+            <div className="flex items-center gap-2 bg-red-50 px-2 py-1 rounded-lg border border-red-100">
+              <span className="text-[10px] font-bold text-red-600 uppercase tracking-tight">Delete?</span>
+              <button
+                onClick={() => onDelete(job.id)}
+                disabled={isDeleting}
+                className="text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 px-1.5 py-0.5 rounded transition-colors"
+              >
+                {isDeleting ? '...' : 'Yes'}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="text-[10px] font-bold text-gray-400 hover:text-gray-600"
+              >
+                No
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(job.id)}
+              className="text-gray-300 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-0.5"
+              title="Delete this run"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Footer row */}

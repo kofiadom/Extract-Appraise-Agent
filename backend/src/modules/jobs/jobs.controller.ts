@@ -91,19 +91,12 @@ export class JobsController {
   }
 
   @Delete(':jobId')
-  @ApiOperation({ summary: 'Cancel a queued or active job' })
+  @ApiOperation({ summary: 'Delete a job from history (and cancel if active)' })
   @ApiParam({ name: 'jobId' })
-  @ApiResponse({ status: 200, description: 'Job cancelled', type: ApiSuccessResponseDto })
-  @ApiResponse({ status: 400, description: 'Job cannot be cancelled', type: ApiErrorResponseDto })
-  async cancelJob(@Param('jobId') jobId: string, @CurrentUser() user: AuthUser) {
-    const cancelled = await this.jobsService.cancelJob(jobId, user.userId);
-    if (!cancelled) {
-      throw new HttpException(
-        'Job cannot be cancelled (already completed, failed, or not found)',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    return { success: true, message: 'Job cancelled successfully' };
+  @ApiResponse({ status: 200, description: 'Job deleted', type: ApiSuccessResponseDto })
+  async deleteJob(@Param('jobId') jobId: string, @CurrentUser() user: AuthUser) {
+    await this.jobsService.deleteJob(jobId, user.userId);
+    return { success: true, message: 'Job deleted successfully' };
   }
 
   @Delete()

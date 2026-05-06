@@ -250,6 +250,11 @@ export async function clearHistory() {
   return data; // { success, message, data: { deleted } }
 }
 
+export async function deleteJob(jobId) {
+  const { data } = await api.delete(`/api/v1/jobs/${jobId}`);
+  return data;
+}
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 export function parseTeamContent(content) {
