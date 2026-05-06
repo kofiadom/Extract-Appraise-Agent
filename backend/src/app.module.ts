@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
@@ -15,6 +16,7 @@ import { PapersModule } from './modules/papers/papers.module';
 import { PipelineModule } from './modules/pipeline/pipeline.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { CleanupModule } from './modules/cleanup/cleanup.module';
 import { RedisConfigService } from './config/redis.config';
 
 @Module({
@@ -45,6 +47,7 @@ import { RedisConfigService } from './config/redis.config';
     }),
 
     BullModule.forRootAsync({ useClass: RedisConfigService }),
+    ScheduleModule.forRoot(),
 
     DatabaseModule,
     FastApiModule,
@@ -56,6 +59,7 @@ import { RedisConfigService } from './config/redis.config';
     PipelineModule,
     ExportsModule,
     ChatModule,
+    CleanupModule,
     HealthModule,
   ],
   providers: [

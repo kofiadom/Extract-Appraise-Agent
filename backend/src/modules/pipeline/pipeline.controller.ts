@@ -11,6 +11,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.interfaces';
 import { PipelineService } from './pipeline.service';
 import { RunPipelineDto } from './dto/run-pipeline.dto';
+import { CheckExistingDto } from './dto/check-existing.dto';
 
 @ApiTags('pipeline')
 @ApiBearerAuth()
@@ -25,6 +26,14 @@ export class PipelineController {
   async run(@Body() body: RunPipelineDto, @CurrentUser() user: AuthUser) {
     const result = await this.pipelineService.runPipeline(user.userId, body.markdownFiles, body.steps);
     return { success: true, message: 'Pipeline job queued', data: result };
+  }
+
+  @Post('check-existing')
+  @ApiOperation({ summary: 'Check if completed results already exist for these markdown files' })
+  @ApiResponse({ status: 200, description: 'List of files that have prior completed results' })
+  async checkExisting(@Body() body: CheckExistingDto, @CurrentUser() user: AuthUser) {
+    const duplicates = await this.pipelineService.checkExisting(user.userId, body.markdownFiles);
+    return { success: true, data: { duplicates } };
   }
 
   @Post('run-batch')

@@ -101,7 +101,7 @@ export class JobsService {
   }
 
   async deleteJob(jobId: string, userId: string): Promise<boolean> {
-    const job = await this.getJobStatus(jobId, userId);
+    await this.getJobStatus(jobId, userId); // validates ownership; throws if not found
 
     // Remove from BullMQ if it exists there
     const bullJob = await this.jobQueue.getJob(jobId);
@@ -110,6 +110,37 @@ export class JobsService {
     await this.jobRepo.delete(jobId);
     this.logger.log(`Job deleted: ${jobId} by user: ${userId}`);
     return true;
+  }
+
+  /**
+   * For each markdown filename, return the most recent completed job that
+   * included that file.  Used by the duplicate-detection flow on upload.
+   */
+  async findExistingByMarkdownFiles(
+    userId: string,
+    markdownFiles: string[],
+  ): Promise<Array<{ markdownFile: string; jobId: string; createdAt: Date; steps: string[] }>> {
+    const results: Array<{ markdownFile: string; jobId: string; createdAt: Date; steps: string[] }> = [];
+    for (const markdownFile of markdownFiles) {
+      const job = await this.jobRepo
+        .createQueryBuilder('job')
+        .where('job.userId = :userId', { userId })
+        .andWhere('job.status = :status', { status: 'completed' })
+        .andWhere(`job.inputData -> 'markdownFiles' @> :file::jsonb`, {
+          file: JSON.stringify([markdownFile]),
+        })
+        .orderBy('job.createdAt', 'DESC')
+        .getOne();
+      if (job) {
+        results.push({
+          markdownFile,
+          jobId: job.id,
+          createdAt: job.createdAt,
+          steps: ((job.inputData as Record<string, unknown>)?.steps as string[]) ?? ['extraction', 'appraisal'],
+        });
+      }
+    }
+    return results;
   }
 
   /**

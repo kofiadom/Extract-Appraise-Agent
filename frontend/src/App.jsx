@@ -16,6 +16,7 @@ import {
   getToken,
   clearToken,
   uploadFiles,
+  checkExistingResults,
   startPipelineJob,
   startPipelineBatch,
   pollPipelineJob,
@@ -63,6 +64,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('evidence');
   const [showPdf, setShowPdf] = useState(false);
   const [selectedSteps, setSelectedSteps] = useState(['extraction', 'appraisal']);
+  // duplicates: [{ markdownFile, jobId, createdAt, steps }] — populated after upload check
+  const [duplicates, setDuplicates] = useState([]);
   const [pdfWidthPct, setPdfWidthPct] = useState(45);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
@@ -118,6 +121,7 @@ export default function App() {
     setErrorMsg('');
     setCurrentJobId(null);
     setSelectedSteps(['extraction', 'appraisal']);
+    setDuplicates([]);
   }, []);
 
   // --- Upload phase ---
@@ -125,9 +129,18 @@ export default function App() {
     if (!files.length) return;
     setPhase('uploading');
     setErrorMsg('');
+    setDuplicates([]);
     try {
       const data = await uploadFiles(files);
-      setMarkdownFiles(data.markdownFiles || data.markdown_files || []);
+      const mdFiles = data.markdownFiles || data.markdown_files || [];
+      setMarkdownFiles(mdFiles);
+      // Check for prior completed results — silently ignore if the endpoint fails
+      try {
+        const dupes = await checkExistingResults(mdFiles);
+        setDuplicates(dupes ?? []);
+      } catch {
+        // non-fatal: duplicate detection is best-effort
+      }
       setPhase('uploaded');
     } catch (err) {
       const msg =
@@ -291,6 +304,42 @@ export default function App() {
     }
   }, [markdownFiles, selectedSteps]);
 
+  // --- Load existing results without running the pipeline ---
+  const handleLoadExisting = useCallback(async () => {
+    if (!duplicates.length) return;
+    setPhase('running');
+    setErrorMsg('');
+    const startTs = Date.now();
+    try {
+      // Load the most recently completed result among the duplicates
+      const sorted = [...duplicates].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      const latest = sorted[0];
+      const raw = await getPipelineResult(latest.jobId);
+      const parsed = findParsedResult(raw);
+      setCurrentJobId(latest.jobId);
+      setMetrics(sumMetrics(raw));
+      setElapsedMs(Date.now() - startTs);
+      if (parsed) {
+        setResults(parsed);
+        setPhase('done');
+        setActiveTab(selectedSteps.includes('extraction') ? 'evidence' : 'appraisal');
+        if (duplicates.length > 1) {
+          setErrorMsg(`Showing cached result for "${latest.markdownFile}". Others are in Run History.`);
+        }
+      } else {
+        setResults({ papers: [], appraisal: { appraisals: [] } });
+        setPhase('done');
+        setErrorMsg('Cached result could not be parsed. Try running fresh.');
+      }
+    } catch (err) {
+      setElapsedMs(Date.now() - startTs);
+      setErrorMsg(err?.response?.data?.message || err.message || 'Failed to load cached results.');
+      setPhase('error');
+    }
+  }, [duplicates, selectedSteps]);
+
   // --- Load a historical result from the history drawer ---
   const loadHistoricalResult = useCallback(({ metrics: m, jobId, raw, elapsedMs }) => {
     const parsed = findParsedResult(raw);
@@ -325,6 +374,7 @@ export default function App() {
     setActiveTab('evidence');
     setCurrentJobId(null);
     setSelectedSteps(['extraction', 'appraisal']);
+    setDuplicates([]);
   }, []);
 
   if (!isAuthenticated) {
@@ -458,6 +508,43 @@ export default function App() {
                 selectedSteps={selectedSteps}
                 onStepsChange={setSelectedSteps}
               />
+
+              {/* Duplicate results banner — shown after upload when prior results exist */}
+              {phase === 'uploaded' && duplicates.length > 0 && (
+                <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center mt-0.5">
+                      <BookOpen size={15} className="text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-blue-800">
+                        Results already exist for {duplicates.length === markdownFiles.length ? 'all' : `${duplicates.length} of ${markdownFiles.length}`} file{duplicates.length !== 1 ? 's' : ''}
+                      </p>
+                      <ul className="mt-1.5 space-y-0.5">
+                        {duplicates.map((d) => (
+                          <li key={d.markdownFile} className="text-xs text-blue-700 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
+                            {d.markdownFile.replace(/^[^_]+_/, '').replace(/\.md$/, '')}
+                            <span className="text-blue-400">
+                              — {new Date(d.createdAt).toLocaleDateString()}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="flex items-center gap-2 mt-3">
+                        <button
+                          onClick={handleLoadExisting}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
+                        >
+                          <BookOpen size={12} />
+                          Load Existing Results
+                        </button>
+                        <span className="text-xs text-blue-400">or use the run button below to reprocess</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -69,6 +69,16 @@ export async function uploadFiles(files) {
   return data.data; // { files, markdownFiles }
 }
 
+/**
+ * For each markdown file, returns the most recent completed job that already
+ * has results for it — or nothing if no prior run exists.
+ * Returns: [{ markdownFile, jobId, createdAt, steps }]
+ */
+export async function checkExistingResults(markdownFiles) {
+  const { data } = await api.post('/api/v1/pipeline/check-existing', { markdownFiles });
+  return data.data.duplicates; // [{ markdownFile, jobId, createdAt, steps }]
+}
+
 /** Legacy: submit all files in one job. */
 export async function startPipelineJob(markdownFiles, steps) {
   const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles, steps });

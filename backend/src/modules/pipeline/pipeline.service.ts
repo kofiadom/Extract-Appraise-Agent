@@ -42,6 +42,10 @@ export class PipelineService {
     return jobs;
   }
 
+  async checkExisting(userId: string, markdownFiles: string[]) {
+    return this.jobsService.findExistingByMarkdownFiles(userId, markdownFiles);
+  }
+
   async getPipelineStatus(jobId: string, userId: string) {
     return this.jobsService.getJobStatus(jobId, userId);
   }

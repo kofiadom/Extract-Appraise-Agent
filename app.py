@@ -554,6 +554,11 @@ async def upload_for_filesearch(files: list[UploadFile], user_id: str = Form("")
         md_filename = f"{prefix}{stem}.md"
         md_path = FS_MARKDOWN_DIR / md_filename
 
+        # Markdown already on disk — skip LlamaParse (saves API cost + time on re-uploads)
+        if md_path.exists():
+            logger.info("Markdown already exists, skipping LlamaParse: %s", md_filename)
+            return saved_path, md_filename
+
         async with semaphore:
             try:
                 logger.info("LlamaParse starting: %s", f.filename)
