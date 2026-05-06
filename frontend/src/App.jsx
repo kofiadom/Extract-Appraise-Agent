@@ -62,6 +62,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [activeTab, setActiveTab] = useState('evidence');
   const [showPdf, setShowPdf] = useState(false);
+  const [selectedSteps, setSelectedSteps] = useState(['extraction', 'appraisal']);
   const [pdfWidthPct, setPdfWidthPct] = useState(45);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
@@ -116,6 +117,7 @@ export default function App() {
     setElapsedMs(null);
     setErrorMsg('');
     setCurrentJobId(null);
+    setSelectedSteps(['extraction', 'appraisal']);
   }, []);
 
   // --- Upload phase ---
@@ -155,7 +157,7 @@ export default function App() {
     try {
       if (isSingleFile) {
         // ── Single-file path ──────────────────────────────────────────────────
-        const jobId = await startPipelineJob(markdownFiles);
+        const jobId = await startPipelineJob(markdownFiles, selectedSteps);
         setCurrentJobId(jobId);
         setDocStatuses([{
           jobId,
@@ -194,7 +196,7 @@ export default function App() {
         if (parsed) {
           setResults(parsed);
           setPhase('done');
-          setActiveTab('evidence');
+          setActiveTab(selectedSteps.includes('extraction') ? 'evidence' : 'appraisal');
         } else {
           setResults({ papers: [], appraisal: { appraisals: [] }, _raw: raw?.content });
           setPhase('done');
@@ -203,7 +205,7 @@ export default function App() {
 
       } else {
         // ── Multi-file path — one independent BullMQ job per file ────────────
-        const batchJobs = await startPipelineBatch(markdownFiles);
+        const batchJobs = await startPipelineBatch(markdownFiles, selectedSteps);
 
         const initial = batchJobs.map((j) => ({
           jobId: j.jobId,
@@ -265,7 +267,7 @@ export default function App() {
         if (parsed) {
           setResults(parsed);
           setPhase('done');
-          setActiveTab('evidence');
+          setActiveTab(selectedSteps.includes('extraction') ? 'evidence' : 'appraisal');
           if (failedCount > 0) {
             setErrorMsg(`${failedCount} document(s) failed. Showing result for "${lastFinished.displayName}". Others are in Run History.`);
           } else if (completed.length > 1) {
@@ -287,7 +289,7 @@ export default function App() {
       setErrorMsg(msg);
       setPhase('error');
     }
-  }, [markdownFiles]);
+  }, [markdownFiles, selectedSteps]);
 
   // --- Load a historical result from the history drawer ---
   const loadHistoricalResult = useCallback(({ metrics: m, jobId, raw, elapsedMs }) => {
@@ -322,6 +324,7 @@ export default function App() {
     setErrorMsg('');
     setActiveTab('evidence');
     setCurrentJobId(null);
+    setSelectedSteps(['extraction', 'appraisal']);
   }, []);
 
   if (!isAuthenticated) {
@@ -330,6 +333,12 @@ export default function App() {
 
   const papers = results?.papers ?? [];
   const appraisals = results?.appraisal?.appraisals || results?.appraisals || [];
+
+  const visibleTabs = TABS.filter(({ id }) => {
+    if (id === 'evidence') return selectedSteps.includes('extraction');
+    if (id === 'appraisal') return selectedSteps.includes('appraisal');
+    return true;
+  });
 
   return (
     <div className="flex min-h-screen" style={{ background: '#F8FAFC' }}>
@@ -446,6 +455,8 @@ export default function App() {
                 onUpload={handleUpload}
                 onRun={handleRun}
                 maxFiles={3}
+                selectedSteps={selectedSteps}
+                onStepsChange={setSelectedSteps}
               />
             </div>
           )}
@@ -468,7 +479,7 @@ export default function App() {
 
               <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-gray-100 shadow-card inline-flex">
-                  {TABS.map(({ id, label, icon: Icon }) => (
+                  {visibleTabs.map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}
                       onClick={() => setActiveTab(id)}

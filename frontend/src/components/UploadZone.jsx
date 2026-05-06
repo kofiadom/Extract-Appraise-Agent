@@ -7,7 +7,7 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function UploadZone({ files, onFilesChange, phase, onUpload, onRun, maxFiles = 3 }) {
+export default function UploadZone({ files, onFilesChange, phase, onUpload, onRun, maxFiles = 3, selectedSteps = ['extraction', 'appraisal'], onStepsChange }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
 
@@ -63,6 +63,25 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
   const isUploaded = phase === 'uploaded';
   const isRunning = phase === 'running';
   const isLocked = isUploading || isRunning;
+
+  const STEP_OPTIONS = [
+    { id: 'extraction', label: 'Evidence Extraction' },
+    { id: 'appraisal', label: 'Quality Appraisal' },
+  ];
+
+  const runLabel =
+    selectedSteps.length === 2
+      ? 'Extract & Appraise'
+      : selectedSteps.includes('extraction')
+      ? 'Extract Evidence'
+      : 'Appraise Quality';
+
+  const runningDesc =
+    selectedSteps.length === 2
+      ? 'Extracting evidence and performing quality appraisal — this may take a few minutes'
+      : selectedSteps.includes('extraction')
+      ? 'Extracting structured evidence — this may take a few minutes'
+      : 'Performing quality appraisal — this may take a few minutes';
 
   return (
     <div className="space-y-4">
@@ -130,9 +149,7 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
           <Loader2 size={28} className="text-amber-500 animate-spin" />
           <div className="text-center">
             <p className="text-amber-700 font-medium text-sm">Running pipeline…</p>
-            <p className="text-amber-600/70 text-xs mt-0.5">
-              Extracting evidence and performing quality appraisal — this may take a few minutes
-            </p>
+            <p className="text-amber-600/70 text-xs mt-0.5">{runningDesc}</p>
           </div>
         </div>
       )}
@@ -173,6 +190,40 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
         </div>
       )}
 
+      {/* Agent step selector — visible after upload, before run */}
+      {isUploaded && onStepsChange && (
+        <div className="space-y-2 pt-1">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Agents to run</p>
+          <div className="flex items-center gap-2">
+            {STEP_OPTIONS.map(({ id, label }) => {
+              const isActive = selectedSteps.includes(id);
+              const isLast = selectedSteps.length === 1 && isActive;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={isLast}
+                  onClick={() =>
+                    onStepsChange(
+                      isActive
+                        ? selectedSteps.filter((s) => s !== id)
+                        : [...selectedSteps, id],
+                    )
+                  }
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-150 ${
+                    isActive
+                      ? 'bg-[#1B2A4A] text-white border-[#1B2A4A] shadow-sm'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex items-center gap-3 pt-2">
         {(phase === 'idle' || phase === 'error') && (
@@ -202,7 +253,7 @@ export default function UploadZone({ files, onFilesChange, phase, onUpload, onRu
               >
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
-              Extract &amp; Appraise
+              {runLabel}
             </button>
             <button
               onClick={() => inputRef.current?.click()}

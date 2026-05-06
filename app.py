@@ -397,34 +397,6 @@ async def _run_pipeline_bg(
         all_member_responses: list = []
         errors: list[str] = []
 
-        def _find_papers_and_appraisals(node: dict):
-            """Recursively search a result node for papers and appraisals."""
-            papers, appraisals = [], []
-            candidates = []
-            content = node.get("content", "")
-            if content:
-                candidates.append(content)
-                stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
-                if stripped != content:
-                    candidates.append(stripped)
-            for m in node.get("member_responses", []):
-                mc = m.get("content", "")
-                if mc:
-                    candidates.append(mc)
-                    candidates.append(re.sub(r"```(?:json)?\s*|```", "", mc).strip())
-
-            for c in candidates:
-                try:
-                    d = json.loads(c.strip())
-                    if "papers" in d:
-                        papers.extend(d["papers"])
-                        appraisal_node = d.get("appraisal", d)
-                        appraisals.extend(appraisal_node.get("appraisals", []))
-                        break
-                except Exception:
-                    pass
-            return papers, appraisals
-
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
                 errors.append(str(outcome))
@@ -439,7 +411,7 @@ async def _run_pipeline_bg(
                 "Pipeline job %s: file %s — %d paper(s), %d appraisal(s)",
                 job_id, md_filename, len(papers), len(appraisals),
             )
-            if not papers:
+            if not papers and "extraction" in steps:
                 errors.append(f"{md_filename}: no papers extracted")
 
         combined_content = json.dumps({
