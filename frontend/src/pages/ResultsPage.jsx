@@ -39,9 +39,11 @@ export default function ResultsPage({ sidebarOpen }) {
   const [activeTab, setActiveTab] = useState('evidence');
 
   // PDF state
-  const [pdfUrl, setPdfUrl]           = useState(null);
-  const [showPdf, setShowPdf]         = useState(false);
-  const [pdfWidthPct, setPdfWidthPct] = useState(45);
+  const [pdfUrl, setPdfUrl]               = useState(null);
+  const [showPdf, setShowPdf]             = useState(false);
+  const [pdfWidthPct, setPdfWidthPct]     = useState(45);
+  const [pdfFetchLoading, setPdfFetchLoading] = useState(false);
+  const [pdfFetchError, setPdfFetchError]     = useState(false);
   const pdfUrlRef  = useRef(null);
   const mainRef    = useRef(null);
   const isDragging = useRef(false);
@@ -120,6 +122,28 @@ export default function ResultsPage({ sidebarOpen }) {
       }
     };
   }, [jobId, inMemoryFile]);
+
+  // PDF button click — toggle if already loaded, otherwise fetch on demand
+  async function handleViewPdfClick() {
+    if (pdfUrl) {
+      setShowPdf((v) => !v);
+      return;
+    }
+    if (pdfFetchLoading) return;
+    if (inMemoryFile) return; // pdfUrl should already be set from the effect
+    setPdfFetchLoading(true);
+    setPdfFetchError(false);
+    try {
+      const url = await getPipelinePdf(jobId);
+      pdfUrlRef.current = url;
+      setPdfUrl(url);
+      setShowPdf(true);
+    } catch {
+      setPdfFetchError(true);
+    } finally {
+      setPdfFetchLoading(false);
+    }
+  }
 
   // Resizable divider
   const handleDividerMouseDown = useCallback((e) => {
@@ -255,17 +279,23 @@ export default function ResultsPage({ sidebarOpen }) {
               ))}
             </div>
 
-            {pdfUrl && (
+            {!loading && !error && (
               <button
-                onClick={() => setShowPdf((v) => !v)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all duration-150 ${
+                onClick={handleViewPdfClick}
+                disabled={pdfFetchLoading}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all duration-150 disabled:opacity-60 ${
                   showPdf
                     ? 'bg-[#1B2A4A] text-white border-[#1B2A4A]'
+                    : pdfFetchError
+                    ? 'bg-red-50 text-red-400 border-red-200 cursor-not-allowed'
                     : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                 }`}
+                title={pdfFetchError ? 'PDF not available for this run' : undefined}
               >
-                <FileText size={14} />
-                {showPdf ? 'Hide PDF' : 'View PDF'}
+                {pdfFetchLoading
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <FileText size={14} />}
+                {pdfFetchError ? 'PDF unavailable' : showPdf ? 'Hide PDF' : 'View PDF'}
               </button>
             )}
           </div>
