@@ -136,10 +136,16 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
 
         if (!mountedRef.current) return;
         if (lastJob.status === 'failed') throw new Error(lastJob.error || 'Pipeline failed.');
-        const elapsedMs = jobStartTimeRef.current[jobId]
-          ? Date.now() - jobStartTimeRef.current[jobId]
-          : null;
-        navigate(`/results/${jobId}`, { state: { file: jobFileMapRef.current[jobId] ?? null, elapsedMs } });
+        // Stay on page — user clicks "View Results" (same UX as multi-file)
+        setDocStatuses([{
+          jobId,
+          fileName: markdownFiles[0],
+          displayName: toDisplayName(markdownFiles[0]),
+          status: 'completed',
+          progress: 100,
+          error: null,
+        }]);
+        setPhaseAndSync('done');
 
       } else {
         const batchJobs = await startPipelineBatch(markdownFiles, selectedSteps, fileMapping);
