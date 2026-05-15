@@ -66,7 +66,7 @@ export async function uploadFiles(files) {
   const { data } = await api.post('/api/v1/papers/upload', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
-  return data.data; // { files, markdownFiles }
+  return data.data; // { files, markdownFiles, fileMapping }
 }
 
 /**
@@ -80,8 +80,8 @@ export async function checkExistingResults(markdownFiles) {
 }
 
 /** Legacy: submit all files in one job. */
-export async function startPipelineJob(markdownFiles, steps) {
-  const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles, steps });
+export async function startPipelineJob(markdownFiles, steps, fileMapping) {
+  const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles, steps, fileMapping });
   return data.data.jobId;
 }
 
@@ -89,9 +89,20 @@ export async function startPipelineJob(markdownFiles, steps) {
  * Submit one independent pipeline job per file.
  * Returns an array of { jobId, fileName, status } objects.
  */
-export async function startPipelineBatch(markdownFiles, steps) {
-  const { data } = await api.post('/api/v1/pipeline/run-batch', { markdownFiles, steps });
+export async function startPipelineBatch(markdownFiles, steps, fileMapping) {
+  const { data } = await api.post('/api/v1/pipeline/run-batch', { markdownFiles, steps, fileMapping });
   return data.data; // [{ jobId, fileName, status }, ...]
+}
+
+/** Fetch the original uploaded PDF for a job and return a blob object URL. */
+export async function getPipelinePdf(jobId, mdFile) {
+  const params = {};
+  if (mdFile) params.file = mdFile;
+  const res = await api.get(`/api/v1/pipeline/${jobId}/pdf`, {
+    params,
+    responseType: 'blob',
+  });
+  return URL.createObjectURL(res.data);
 }
 
 export async function pollPipelineJob(jobId) {

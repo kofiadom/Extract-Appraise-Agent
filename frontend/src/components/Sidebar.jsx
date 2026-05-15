@@ -1,7 +1,15 @@
 import { useState } from 'react';
-import { RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight, LogOut, Clock } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { RotateCcw, BookOpen, AlertTriangle, ChevronLeft, ChevronRight, LogOut, Clock, FlaskConical, MessageSquare } from 'lucide-react';
+
+const NAV_ITEMS = [
+  { path: '/',     label: 'Extractor', icon: FlaskConical },
+  { path: '/chat', label: 'Chat',      icon: MessageSquare },
+];
 
 export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpen, onToggle }) {
+  const navigate  = useNavigate();
+  const location  = useLocation();
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   function handleResetClick() {
@@ -52,6 +60,20 @@ export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpe
           <div title={`Status: ${phase}`} className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
             <StatusDot phase={phase} />
           </div>
+          {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+            <button
+              key={path}
+              onClick={() => navigate(path)}
+              title={label}
+              className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                location.pathname === path
+                  ? 'bg-white/20 text-white'
+                  : 'bg-white/5 text-white/40 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Icon size={13} />
+            </button>
+          ))}
           <button
             onClick={onOpenHistory}
             title="Run History"
@@ -84,8 +106,26 @@ export default function Sidebar({ onReset, onLogout, onOpenHistory, phase, isOpe
             <StatusIndicator phase={phase} />
           </div>
 
+          {/* Mode navigation */}
+          <div className="px-5 pt-5 space-y-1">
+            {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+              <button
+                key={path}
+                onClick={() => navigate(path)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-all duration-150 ${
+                  location.pathname === path
+                    ? 'bg-white/15 text-white border-white/20'
+                    : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border-transparent'
+                }`}
+              >
+                <Icon size={14} className="flex-shrink-0" />
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* History button */}
-          <div className="px-5 pt-5">
+          <div className="px-5 pt-2">
             <button
               onClick={onOpenHistory}
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-transparent transition-all duration-150"

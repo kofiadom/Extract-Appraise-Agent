@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Param, Query, Body, UseGuards, Res } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -24,7 +25,7 @@ export class PipelineController {
   @ApiOperation({ summary: 'Start extraction + appraisal pipeline for uploaded papers (single job for all files)' })
   @ApiResponse({ status: 201, description: 'Pipeline job queued — poll /:jobId for status' })
   async run(@Body() body: RunPipelineDto, @CurrentUser() user: AuthUser) {
-    const result = await this.pipelineService.runPipeline(user.userId, body.markdownFiles, body.steps);
+    const result = await this.pipelineService.runPipeline(user.userId, body.markdownFiles, body.steps, body.fileMapping);
     return { success: true, message: 'Pipeline job queued', data: result };
   }
 
@@ -40,7 +41,7 @@ export class PipelineController {
   @ApiOperation({ summary: 'Submit one independent pipeline job per file — returns array of {jobId, fileName}' })
   @ApiResponse({ status: 201, description: 'One job per file queued — poll each /:jobId independently' })
   async runBatch(@Body() body: RunPipelineDto, @CurrentUser() user: AuthUser) {
-    const jobs = await this.pipelineService.runPipelineForFiles(user.userId, body.markdownFiles, body.steps);
+    const jobs = await this.pipelineService.runPipelineForFiles(user.userId, body.markdownFiles, body.steps, body.fileMapping);
     return { success: true, message: `${jobs.length} pipeline job(s) queued`, data: jobs };
   }
 
@@ -61,5 +62,26 @@ export class PipelineController {
   async getResult(@Param('jobId') jobId: string, @CurrentUser() user: AuthUser) {
     const result = await this.pipelineService.getPipelineResult(jobId, user.userId);
     return { success: true, data: result };
+  }
+
+  @Get(':jobId/pdf')
+  @ApiOperation({ summary: 'Serve the original uploaded PDF for a pipeline job' })
+  @ApiParam({ name: 'jobId' })
+  @ApiResponse({ status: 200, description: 'Returns the PDF file inline' })
+  @ApiResponse({ status: 404, description: 'PDF not found or job predates PDF tracking' })
+  async getPdf(
+    @Param('jobId') jobId: string,
+    @Query('file') file: string | undefined,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const { filePath, originalName } = await this.pipelineService.getPipelinePdfPath(
+      jobId,
+      user.userId,
+      file,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(originalName)}"`);
+    res.sendFile(filePath);
   }
 }

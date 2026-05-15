@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, ArrayMinSize, ArrayMaxSize, IsIn, IsOptional } from 'class-validator';
+import { IsArray, IsString, ArrayMinSize, ArrayMaxSize, IsIn, IsOptional, IsObject } from 'class-validator';
 
 export class RunPipelineDto {
   @ApiProperty({
@@ -22,4 +22,13 @@ export class RunPipelineDto {
   @IsString({ each: true })
   @IsIn(['extraction', 'appraisal'], { each: true })
   steps?: string[];
+
+  @ApiProperty({
+    description: 'Mapping of markdownFile → original PDF filename, returned by POST /papers/upload',
+    example: { 'user_paper.md': 'paper.pdf' },
+    required: false,
+  })
+  @IsOptional()
+  @IsObject()
+  fileMapping?: Record<string, string>;
 }

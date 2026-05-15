@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, Clock, FileText, Loader2, ChevronDown, BookOpen, Trash2, AlertTriangle } from 'lucide-react';
-import { listJobs, getJobResultById, sumMetrics, clearHistory, deleteJob } from '../services/api.js';
+import { listJobs, clearHistory, deleteJob } from '../services/api.js';
 
 const LIMIT = 15;
 
@@ -10,7 +11,8 @@ const STATUS_FILTERS = [
   { id: 'failed', label: 'Failed' },
 ];
 
-export default function HistoryDrawer({ open, onClose, onLoadResult }) {
+export default function HistoryDrawer({ open, onClose }) {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState(undefined);
   const [jobs, setJobs] = useState([]);
   const [total, setTotal] = useState(0);
@@ -59,19 +61,9 @@ export default function HistoryDrawer({ open, onClose, onLoadResult }) {
     fetchJobs(filter, next, true);
   }
 
-  async function handleView(job) {
-    setLoadingJobId(job.id);
-    try {
-      const raw = await getJobResultById(job.id);
-      const metrics = sumMetrics(raw);
-      const elapsedMs = new Date(job.updatedAt).getTime() - new Date(job.createdAt).getTime();
-      onLoadResult({ metrics, jobId: job.id, raw, elapsedMs });
-      onClose();
-    } catch {
-      // leave drawer open so user sees the job list still
-    } finally {
-      setLoadingJobId(null);
-    }
+  function handleView(job) {
+    navigate(`/results/${job.id}`);
+    onClose();
   }
 
   async function handleDelete(jobId) {
