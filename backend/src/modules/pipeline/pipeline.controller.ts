@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Param, Query, Body, UseGuards, Res } from '@nestjs/common';
+import { createReadStream } from 'fs';
 import { Response } from 'express';
 import {
   ApiTags,
@@ -82,6 +83,6 @@ export class PipelineController {
     );
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(originalName)}"`);
-    res.sendFile(filePath);
+    createReadStream(filePath).pipe(res);
   }
 }

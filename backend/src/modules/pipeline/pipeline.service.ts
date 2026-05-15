@@ -1,12 +1,14 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JobsService } from '../jobs/jobs.service';
 import { JOB_TYPES } from '../../types';
 
 @Injectable()
 export class PipelineService {
+  private readonly logger = new Logger(PipelineService.name);
+
   constructor(
     private readonly jobsService: JobsService,
     private readonly config: ConfigService,
@@ -65,7 +67,10 @@ export class PipelineService {
     if (!targetMd) throw new NotFoundException('No files associated with this job');
 
     const stored = fileMapping[targetMd];
-    if (!stored) throw new NotFoundException('PDF not found — this job predates PDF tracking');
+    if (!stored) {
+      this.logger.warn(`[PDF] No fileMapping entry for ${targetMd} in job ${jobId}`);
+      throw new NotFoundException('PDF not found — this job predates PDF tracking');
+    }
 
     let filePath: string;
     let originalName: string;
@@ -83,12 +88,16 @@ export class PipelineService {
       const papersDir = path.resolve(this.config.get<string>('PAPERS_FS_DIR') ?? defaultDir);
       filePath = path.resolve(papersDir, stored);
       originalName = stored;
+      this.logger.log(`[PDF] legacy path: papersDir=${papersDir} stored=${stored} filePath=${filePath}`);
       if (!filePath.startsWith(papersDir + path.sep) && filePath !== papersDir) {
         throw new BadRequestException('Invalid file path');
       }
     }
 
+    this.logger.log(`[PDF] job=${jobId} stored=${stored} filePath=${filePath}`);
+
     if (!fs.existsSync(filePath)) {
+      this.logger.warn(`[PDF] file not found on disk: ${filePath}`);
       throw new NotFoundException('PDF file no longer exists on disk');
     }
 
