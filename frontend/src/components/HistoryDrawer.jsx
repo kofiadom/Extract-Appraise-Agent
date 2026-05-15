@@ -192,7 +192,7 @@ export default function HistoryDrawer({ open, onClose }) {
                 title="Select runs for bulk download"
               >
                 <CheckSquare size={12} />
-                Select
+                Download Multiple
               </button>
             )
           )}

@@ -35,6 +35,7 @@ export default function ResultsPage({ sidebarOpen }) {
   const [error, setError]     = useState(null);
   const [results, setResults] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(null);
   const [activeTab, setActiveTab] = useState('evidence');
 
   // PDF state
@@ -57,6 +58,9 @@ export default function ResultsPage({ sidebarOpen }) {
         const parsed = findParsedResult(raw);
         const m = sumMetrics(raw);
         setMetrics(m);
+        // Agno reports time in seconds as a float — convert to ms for MetricsBar
+        const agnoTimeSec = raw?.metrics?.time ?? raw?.metrics?.total_time ?? null;
+        if (agnoTimeSec != null) setElapsedMs(Math.round(agnoTimeSec * 1000));
         setResults(parsed ?? { papers: [], appraisal: { appraisals: [] } });
 
         const hasPapers     = parsed?.papers?.length > 0;
@@ -219,6 +223,7 @@ export default function ResultsPage({ sidebarOpen }) {
             metrics={metrics}
             papersCount={papers.length}
             appraised={appraisals.length}
+            elapsedMs={elapsedMs}
           />
 
           {/* Tab bar + PDF toggle */}
