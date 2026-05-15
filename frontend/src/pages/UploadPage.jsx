@@ -38,6 +38,8 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
   const [duplicates, setDuplicates] = useState([]);
   // Map jobId → File so the results page can show the PDF without a backend round-trip
   const jobFileMapRef = useRef({});
+  // Wall-clock start time per jobId so ResultsPage can display elapsed time
+  const jobStartTimeRef = useRef({});
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -98,8 +100,9 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
       if (isSingleFile) {
         const jobId = await startPipelineJob(markdownFiles, selectedSteps, fileMapping);
         if (!mountedRef.current) return;
-        // Store file reference so we can pass it to the results page
+        // Store file reference and start time so we can pass them to the results page
         jobFileMapRef.current[jobId] = files[0];
+        jobStartTimeRef.current[jobId] = Date.now();
         setCurrentJobId(jobId);
         setDocStatuses([{
           jobId,
@@ -133,15 +136,20 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
 
         if (!mountedRef.current) return;
         if (lastJob.status === 'failed') throw new Error(lastJob.error || 'Pipeline failed.');
-        navigate(`/results/${jobId}`, { state: { file: jobFileMapRef.current[jobId] ?? null } });
+        const elapsedMs = jobStartTimeRef.current[jobId]
+          ? Date.now() - jobStartTimeRef.current[jobId]
+          : null;
+        navigate(`/results/${jobId}`, { state: { file: jobFileMapRef.current[jobId] ?? null, elapsedMs } });
 
       } else {
         const batchJobs = await startPipelineBatch(markdownFiles, selectedSteps, fileMapping);
         if (!mountedRef.current) return;
 
+        const batchStart = Date.now();
         // Map each jobId to the File that was uploaded (same order as markdownFiles)
         batchJobs.forEach((j, i) => {
           jobFileMapRef.current[j.jobId] = files[i] ?? null;
+          jobStartTimeRef.current[j.jobId] = batchStart;
         });
 
         const initial = batchJobs.map((j) => ({
@@ -356,14 +364,16 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
             <DocumentProgressList
               docStatuses={docStatuses}
               allDone={phase === 'done'}
-              onViewResult={(jobId) =>
+              onViewResult={(jobId) => {
+                const start = jobStartTimeRef.current[jobId];
                 navigate(`/results/${jobId}`, {
                   state: {
                     file: jobFileMapRef.current[jobId] ?? null,
+                    elapsedMs: start ? Date.now() - start : null,
                     _fromUploadDone: { docStatuses },
                   },
-                })
-              }
+                });
+              }}
             />
           </div>
         )}

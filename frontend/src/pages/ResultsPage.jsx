@@ -10,6 +10,7 @@ import DownloadTab from '../components/DownloadTab.jsx';
 import {
   getPipelineResult,
   getPipelinePdf,
+  pollPipelineJob,
   findParsedResult,
   sumMetrics,
 } from '../services/api.js';
@@ -35,7 +36,8 @@ export default function ResultsPage({ sidebarOpen }) {
   const [error, setError]     = useState(null);
   const [results, setResults] = useState(null);
   const [metrics, setMetrics] = useState(null);
-  const [elapsedMs, setElapsedMs] = useState(null);
+  // Seed from navigate state for fresh runs; history runs fall back to API metrics
+  const [elapsedMs, setElapsedMs] = useState(location.state?.elapsedMs ?? null);
   const [activeTab, setActiveTab] = useState('evidence');
 
   // PDF state
@@ -60,17 +62,15 @@ export default function ResultsPage({ sidebarOpen }) {
         const parsed = findParsedResult(raw);
         const m = sumMetrics(raw);
         setMetrics(m);
-        // Agno reports time in seconds as a float — convert to ms for MetricsBar.
-        // _run_one_file_direct returns no top-level metrics; fall back to the max
-        // time across member_responses (agents run in parallel, so wall-clock ≈ max).
-        let agnoTimeSec = raw?.metrics?.time ?? raw?.metrics?.total_time ?? null;
-        if (agnoTimeSec == null && Array.isArray(raw?.member_responses)) {
-          const times = raw.member_responses
-            .map((m) => m?.metrics?.time)
-            .filter((t) => t != null);
-          if (times.length > 0) agnoTimeSec = Math.max(...times);
+        // For history runs (no navigate state), compute from job timestamps.
+        // Fresh runs already have elapsedMs seeded from navigate state.
+        if (location.state?.elapsedMs == null) {
+          const jobStatus = await pollPipelineJob(jobId);
+          if (!cancelled && jobStatus?.createdAt && jobStatus?.updatedAt) {
+            const ms = new Date(jobStatus.updatedAt).getTime() - new Date(jobStatus.createdAt).getTime();
+            if (ms > 0) setElapsedMs(ms);
+          }
         }
-        if (agnoTimeSec != null) setElapsedMs(Math.round(agnoTimeSec * 1000));
         setResults(parsed ?? { papers: [], appraisal: { appraisals: [] } });
 
         const hasPapers     = parsed?.papers?.length > 0;
