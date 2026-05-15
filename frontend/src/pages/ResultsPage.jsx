@@ -60,8 +60,16 @@ export default function ResultsPage({ sidebarOpen }) {
         const parsed = findParsedResult(raw);
         const m = sumMetrics(raw);
         setMetrics(m);
-        // Agno reports time in seconds as a float — convert to ms for MetricsBar
-        const agnoTimeSec = raw?.metrics?.time ?? raw?.metrics?.total_time ?? null;
+        // Agno reports time in seconds as a float — convert to ms for MetricsBar.
+        // _run_one_file_direct returns no top-level metrics; fall back to the max
+        // time across member_responses (agents run in parallel, so wall-clock ≈ max).
+        let agnoTimeSec = raw?.metrics?.time ?? raw?.metrics?.total_time ?? null;
+        if (agnoTimeSec == null && Array.isArray(raw?.member_responses)) {
+          const times = raw.member_responses
+            .map((m) => m?.metrics?.time)
+            .filter((t) => t != null);
+          if (times.length > 0) agnoTimeSec = Math.max(...times);
+        }
         if (agnoTimeSec != null) setElapsedMs(Math.round(agnoTimeSec * 1000));
         setResults(parsed ?? { papers: [], appraisal: { appraisals: [] } });
 
