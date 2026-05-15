@@ -27,6 +27,7 @@ function AppraisalCard({ appraisal, index }) {
   const [expanded, setExpanded] = useState(true);
 
   const ref =
+    appraisal.article_reference ||
     appraisal.reference ||
     appraisal.citation ||
     appraisal.paper_reference ||
@@ -51,8 +52,8 @@ function AppraisalCard({ appraisal, index }) {
             {index + 1}
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-800 leading-snug line-clamp-2">
-              {truncate(ref, 160)}
+            <p className="text-sm font-semibold text-gray-800 leading-snug">
+              {ref}
             </p>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               {studyType && (

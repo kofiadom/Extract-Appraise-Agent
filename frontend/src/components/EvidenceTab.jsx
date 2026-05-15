@@ -31,7 +31,7 @@ function Section({ icon: Icon, title, children, className = '' }) {
 function EvidenceCard({ paper, index }) {
   const [expanded, setExpanded] = useState(true);
 
-  const ref = paper.reference || paper.citation || paper.title || `Paper ${index + 1}`;
+  const ref = paper.article_reference || paper.reference || paper.citation || paper.title || `Paper ${index + 1}`;
   const country = paper.country || paper.setting_country || '';
   const studyType = paper.study_type || paper.study_design || '';
   const peerReviewed = paper.peer_reviewed;
@@ -58,8 +58,8 @@ function EvidenceCard({ paper, index }) {
             {index + 1}
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-800 leading-snug line-clamp-2">
-              {truncate(ref, 160)}
+            <p className="text-sm font-semibold text-gray-800 leading-snug">
+              {ref}
             </p>
             {paper.year && (
               <p className="text-xs text-gray-400 mt-0.5">{paper.year}</p>
@@ -154,7 +154,7 @@ function EvidenceCard({ paper, index }) {
 }
 
 const KNOWN_EVIDENCE_KEYS = new Set([
-  'reference', 'citation', 'title', 'year', 'country', 'setting_country',
+  'article_reference', 'reference', 'citation', 'title', 'year', 'country', 'setting_country',
   'study_type', 'study_design', 'peer_reviewed', 'intervention', 'intervention_description',
   'population', 'participants', 'setting', 'study_setting',
   'primary_results', 'main_findings', 'results', 'additional_findings',
