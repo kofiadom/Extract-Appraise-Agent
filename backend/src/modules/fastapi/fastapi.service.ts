@@ -121,6 +121,23 @@ export class FastApiService {
     }
   }
 
+  async fetchPdf(storedPath: string): Promise<{ buffer: Buffer; filename: string }> {
+    try {
+      const { data } = await this.http.get('/papers/serve', {
+        params: { file_path: storedPath },
+        responseType: 'arraybuffer',
+        timeout: this.getTimeout('FASTAPI_PDF_TIMEOUT_MS', 30_000),
+      });
+      return {
+        buffer: Buffer.from(data as ArrayBuffer),
+        filename: storedPath.split('/').pop()?.split('\\').pop() ?? 'document.pdf',
+      };
+    } catch (error) {
+      this.logger.error(`FastAPI fetchPdf failed for ${storedPath}:`, error);
+      throw new InternalServerErrorException('PDF not available from AI service');
+    }
+  }
+
   async deleteDocument(docId: string): Promise<void> {
     try {
       await this.http.delete(`/chat/document/${docId}`);

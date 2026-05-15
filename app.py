@@ -582,6 +582,20 @@ async def upload_for_filesearch(files: list[UploadFile], user_id: str = Form("")
     return {"files": saved_paths, "markdown_files": markdown_files}
 
 
+@app.get("/papers/serve", tags=["FileSearch"])
+async def serve_paper_pdf(file_path: str):
+    """Serve a stored PDF file by its absolute path — called internally by NestJS backend."""
+    from fastapi.responses import FileResponse as _FileResponse
+    p = Path(file_path)
+    try:
+        p.relative_to(FS_PAPERS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return _FileResponse(str(p), media_type="application/pdf", filename=p.name)
+
+
 
 # ── Chat with Doc — document management endpoints ─────────────────────────────
 # The chat QUERY is handled by AgentOS at POST /agents/pageindex-chat-agent/runs.

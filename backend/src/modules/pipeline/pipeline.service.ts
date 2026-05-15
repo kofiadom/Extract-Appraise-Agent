@@ -94,12 +94,7 @@ export class PipelineService {
       }
     }
 
-    this.logger.log(`[PDF] job=${jobId} stored=${stored} filePath=${filePath}`);
-
-    if (!fs.existsSync(filePath)) {
-      this.logger.warn(`[PDF] file not found on disk: ${filePath}`);
-      throw new NotFoundException('PDF file no longer exists on disk');
-    }
+    this.logger.log(`[PDF] job=${jobId} filePath=${filePath}`);
 
     return { filePath, originalName };
   }

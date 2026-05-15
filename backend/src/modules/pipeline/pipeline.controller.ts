@@ -1,5 +1,4 @@
 import { Controller, Post, Get, Param, Query, Body, UseGuards, Res } from '@nestjs/common';
-import { createReadStream } from 'fs';
 import { Response } from 'express';
 import {
   ApiTags,
@@ -12,6 +11,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.interfaces';
 import { PipelineService } from './pipeline.service';
+import { FastApiService } from '../fastapi/fastapi.service';
 import { RunPipelineDto } from './dto/run-pipeline.dto';
 import { CheckExistingDto } from './dto/check-existing.dto';
 
@@ -20,7 +20,10 @@ import { CheckExistingDto } from './dto/check-existing.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('pipeline')
 export class PipelineController {
-  constructor(private readonly pipelineService: PipelineService) {}
+  constructor(
+    private readonly pipelineService: PipelineService,
+    private readonly fastApiService: FastApiService,
+  ) {}
 
   @Post('run')
   @ApiOperation({ summary: 'Start extraction + appraisal pipeline for uploaded papers (single job for all files)' })
@@ -76,13 +79,14 @@ export class PipelineController {
     @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
-    const { filePath, originalName } = await this.pipelineService.getPipelinePdfPath(
+    const { filePath } = await this.pipelineService.getPipelinePdfPath(
       jobId,
       user.userId,
       file,
     );
+    const { buffer, filename } = await this.fastApiService.fetchPdf(filePath);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(originalName)}"`);
-    createReadStream(filePath).pipe(res);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
+    res.end(buffer);
   }
 }
