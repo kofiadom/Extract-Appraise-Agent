@@ -88,7 +88,7 @@ export default function ChatPage({ sidebarOpen }) {
           <div className="mb-8">
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Chat with Your Document</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Index any PDF with PageIndex and ask questions using vectorless, reasoning-based retrieval.
+              Upload a PDF and ask questions about its content.
             </p>
           </div>
           <ChatWithDoc onFileSelected={handleFileSelected} />

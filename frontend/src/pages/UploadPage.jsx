@@ -4,6 +4,7 @@ import { AlertCircle, RefreshCw, BookOpen } from 'lucide-react';
 import StepIndicator from '../components/StepIndicator.jsx';
 import UploadZone from '../components/UploadZone.jsx';
 import DocumentProgressList from '../components/DocumentProgressList.jsx';
+import BulkDownloadButton from '../components/BulkDownloadButton.jsx';
 import {
   uploadFiles,
   checkExistingResults,
@@ -350,6 +351,27 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
             />
           </div>
         )}
+
+        {/* Bulk download — shown when ≥2 docs completed */}
+        {phase === 'done' && docStatuses.filter((d) => d.status === 'completed').length >= 2 && (() => {
+          const completedIds = docStatuses.filter((d) => d.status === 'completed').map((d) => d.jobId);
+          return (
+            <div className="card p-5 mb-6">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Download All Results</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {completedIds.length} documents combined into one file
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <BulkDownloadButton jobIds={completedIds} format="excel" label="📗 Excel Report" />
+                  <BulkDownloadButton jobIds={completedIds} format="word" label="📝 Word Report" />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* "Process more files" button after multi-file run completes */}
         {phase === 'done' && (

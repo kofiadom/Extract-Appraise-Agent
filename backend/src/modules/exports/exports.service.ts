@@ -28,6 +28,37 @@ export class ExportsService {
     return this.docxGenerator.generate(appraisals);
   }
 
+  async bulkExport(
+    jobIds: string[],
+    userId: string,
+    format: 'excel' | 'word',
+  ): Promise<Buffer> {
+    const results = await Promise.all(
+      jobIds.map(async (jobId) => {
+        try {
+          const job = await this.findCompletedJob(jobId, userId);
+          const parsed = this.extractFromRaw(job.result as Record<string, unknown>);
+          if (!parsed) return null;
+          const markdownFiles = ((job.inputData as Record<string, unknown>)?.['markdownFiles'] ?? []) as string[];
+          const docName = this.formatDocName(markdownFiles[0] ?? '', jobId);
+          return { docName, papers: parsed.papers ?? [], appraisals: parsed.appraisals ?? [] };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    const valid = results.filter((r): r is NonNullable<typeof r> => r !== null);
+    if (valid.length === 0) {
+      throw new BadRequestException('No valid completed results found for the provided job IDs');
+    }
+
+    if (format === 'excel') {
+      return this.excelGenerator.generateBulk(valid.map((r) => ({ docName: r.docName, papers: r.papers })));
+    }
+    return this.docxGenerator.generateBulk(valid.map((r) => ({ docName: r.docName, appraisals: r.appraisals })));
+  }
+
   async getRawJson(jobId: string, userId: string): Promise<Record<string, unknown>> {
     const job = await this.findCompletedJob(jobId, userId);
     return job.result as Record<string, unknown>;
@@ -52,6 +83,14 @@ export class ExportsService {
     }
     if (!job.result) throw new BadRequestException('Job has no stored result');
     return job;
+  }
+
+  private formatDocName(mdFile: string, fallback: string): string {
+    let name = mdFile.replace(/\.md$/i, '');
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i.test(name)) {
+      name = name.slice(37);
+    }
+    return name || fallback.slice(0, 20);
   }
 
   /**

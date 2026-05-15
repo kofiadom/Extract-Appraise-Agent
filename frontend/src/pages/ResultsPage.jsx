@@ -26,6 +26,10 @@ export default function ResultsPage({ sidebarOpen }) {
   const location  = useLocation();
   // File object passed from UploadPage via navigate state (available for fresh runs)
   const inMemoryFile = location.state?.file ?? null;
+  // Human-readable document name — from in-memory file (fresh) or state passed by HistoryDrawer
+  const docName = inMemoryFile
+    ? inMemoryFile.name.replace(/\.pdf$/i, '')
+    : (location.state?.docName ?? null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -197,13 +201,18 @@ export default function ResultsPage({ sidebarOpen }) {
           <div className="mb-6 flex items-center gap-3">
             <button
               onClick={() => navigate('/')}
-              className="flex items-center gap-1.5 text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors"
+              className="flex items-center gap-1.5 text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors flex-shrink-0"
             >
               <ArrowLeft size={15} />
               Back
             </button>
-            <span className="text-gray-200">|</span>
-            <h1 className="text-lg font-bold text-gray-900 tracking-tight">Results</h1>
+            <span className="text-gray-200 flex-shrink-0">|</span>
+            <div className="min-w-0">
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider leading-none mb-0.5">Results</p>
+              <h1 className="text-lg font-bold text-gray-900 tracking-tight truncate" title={docName ?? undefined}>
+                {docName ?? 'Extraction & Appraisal'}
+              </h1>
+            </div>
           </div>
 
           <MetricsBar

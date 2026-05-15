@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Clock, FileText, Loader2, ChevronDown, BookOpen, Trash2, AlertTriangle } from 'lucide-react';
+import { X, Clock, FileText, Loader2, ChevronDown, BookOpen, Trash2, AlertTriangle, CheckSquare, Square } from 'lucide-react';
 import { listJobs, clearHistory, deleteJob } from '../services/api.js';
+import BulkDownloadButton from './BulkDownloadButton.jsx';
 
 const LIMIT = 15;
 
@@ -25,6 +26,8 @@ export default function HistoryDrawer({ open, onClose }) {
   const [error, setError] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   const fetchJobs = useCallback(async (statusFilter, newOffset, append = false) => {
     if (append) setLoadingMore(true);
@@ -46,6 +49,8 @@ export default function HistoryDrawer({ open, onClose }) {
     if (!open) return;
     setOffset(0);
     setJobs([]);
+    setSelectMode(false);
+    setSelectedIds(new Set());
     fetchJobs(filter, 0);
   }, [open, filter, fetchJobs]);
 
@@ -53,6 +58,22 @@ export default function HistoryDrawer({ open, onClose }) {
     setFilter(id);
     setOffset(0);
     setJobs([]);
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function handleToggleSelect(jobId) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
+  function handleCancelSelect() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
   }
 
   function handleLoadMore() {
@@ -62,7 +83,8 @@ export default function HistoryDrawer({ open, onClose }) {
   }
 
   function handleView(job) {
-    navigate(`/results/${job.id}`);
+    const rawName = (job.inputData?.markdownFiles ?? [])[0] ?? '';
+    navigate(`/results/${job.id}`, { state: { docName: formatFileName(rawName) || undefined } });
     onClose();
   }
 
@@ -135,7 +157,7 @@ export default function HistoryDrawer({ open, onClose }) {
           </button>
         </div>
 
-        {/* Filter pills + count + clear button */}
+        {/* Filter pills + count + clear + select button */}
         <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100 flex-shrink-0 flex-wrap">
           {STATUS_FILTERS.map(({ id, label }) => (
             <button
@@ -150,8 +172,29 @@ export default function HistoryDrawer({ open, onClose }) {
               {label}
             </button>
           ))}
-          {total > 0 && (
+          {total > 0 && !selectMode && (
             <span className="ml-auto text-xs text-gray-400">{total} run{total !== 1 ? 's' : ''}</span>
+          )}
+
+          {/* Select mode toggle */}
+          {jobs.length > 0 && !confirmClear && (
+            selectMode ? (
+              <button
+                onClick={handleCancelSelect}
+                className="ml-auto text-xs text-gray-500 hover:text-gray-700 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={() => setSelectMode(true)}
+                className="ml-auto flex items-center gap-1 text-xs text-[#1B2A4A] hover:text-[#243657] transition-colors font-medium"
+                title="Select runs for bulk download"
+              >
+                <CheckSquare size={12} />
+                Select
+              </button>
+            )
           )}
 
           {/* Clear history */}
@@ -226,6 +269,9 @@ export default function HistoryDrawer({ open, onClose }) {
                   setConfirmDelete={(id) => setConfirmDeleteId(id)}
                   isLoading={loadingJobId === job.id}
                   isDeleting={deletingJobId === job.id}
+                  selectMode={selectMode}
+                  isSelected={selectedIds.has(job.id)}
+                  onToggleSelect={handleToggleSelect}
                 />
               ))}
 
@@ -246,20 +292,61 @@ export default function HistoryDrawer({ open, onClose }) {
             </div>
           )}
         </div>
+        {/* Sticky bulk download bar */}
+        {selectMode && (
+          <div className="flex-shrink-0 border-t border-gray-100 bg-white px-5 py-3.5 flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium text-gray-700 flex-1 min-w-0">
+              {selectedIds.size > 0
+                ? `${selectedIds.size} selected`
+                : 'Select runs above'}
+            </span>
+            <BulkDownloadButton
+              jobIds={[...selectedIds]}
+              format="excel"
+              label="📗 Excel"
+              variant="outline"
+            />
+            <BulkDownloadButton
+              jobIds={[...selectedIds]}
+              format="word"
+              label="📝 Word"
+              variant="outline"
+            />
+          </div>
+        )}
       </div>
     </>
   );
 }
 
-function JobCard({ job, onView, onDelete, confirmDelete, setConfirmDelete, isLoading, isDeleting }) {
+function JobCard({ job, onView, onDelete, confirmDelete, setConfirmDelete, isLoading, isDeleting, selectMode, isSelected, onToggleSelect }) {
   const files = (job.inputData?.markdownFiles ?? []).map(formatFileName);
   const primary = files[0] ?? 'Unknown file';
   const extra = files.length - 1;
+  const canSelect = job.status === 'completed';
 
   return (
-    <div className="border border-gray-100 rounded-xl p-4 hover:border-gray-200 hover:shadow-sm transition-all bg-white group">
+    <div
+      className={`border rounded-xl p-4 transition-all bg-white group ${
+        isSelected
+          ? 'border-[#1B2A4A]/30 shadow-sm bg-[#1B2A4A]/[0.02]'
+          : 'border-gray-100 hover:border-gray-200 hover:shadow-sm'
+      }`}
+      onClick={selectMode && canSelect ? () => onToggleSelect(job.id) : undefined}
+      style={selectMode && canSelect ? { cursor: 'pointer' } : undefined}
+    >
       {/* File name row */}
       <div className="flex items-start gap-2.5 mb-3">
+        {selectMode && (
+          <button
+            onClick={(e) => { e.stopPropagation(); canSelect && onToggleSelect(job.id); }}
+            disabled={!canSelect}
+            className={`flex-shrink-0 mt-0.5 transition-colors ${canSelect ? 'text-[#1B2A4A] hover:text-[#243657]' : 'text-gray-200 cursor-not-allowed'}`}
+            title={canSelect ? (isSelected ? 'Deselect' : 'Select') : 'Only completed runs can be selected'}
+          >
+            {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+          </button>
+        )}
         <FileText size={14} className="text-gray-400 flex-shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-800 truncate" title={primary}>
@@ -274,18 +361,18 @@ function JobCard({ job, onView, onDelete, confirmDelete, setConfirmDelete, isLoa
         <div className="flex items-center gap-2">
           {!confirmDelete && <StatusBadge status={job.status} />}
           
-          {confirmDelete ? (
+          {!selectMode && (confirmDelete ? (
             <div className="flex items-center gap-2 bg-red-50 px-2 py-1 rounded-lg border border-red-100">
               <span className="text-[10px] font-bold text-red-600 uppercase tracking-tight">Delete?</span>
               <button
-                onClick={() => onDelete(job.id)}
+                onClick={(e) => { e.stopPropagation(); onDelete(job.id); }}
                 disabled={isDeleting}
                 className="text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 px-1.5 py-0.5 rounded transition-colors"
               >
                 {isDeleting ? '...' : 'Yes'}
               </button>
               <button
-                onClick={() => setConfirmDelete(null)}
+                onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }}
                 className="text-[10px] font-bold text-gray-400 hover:text-gray-600"
               >
                 No
@@ -293,13 +380,13 @@ function JobCard({ job, onView, onDelete, confirmDelete, setConfirmDelete, isLoa
             </div>
           ) : (
             <button
-              onClick={() => setConfirmDelete(job.id)}
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(job.id); }}
               className="text-gray-300 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-0.5"
               title="Delete this run"
             >
               <Trash2 size={12} />
             </button>
-          )}
+          ))}
         </div>
       </div>
 
@@ -307,9 +394,9 @@ function JobCard({ job, onView, onDelete, confirmDelete, setConfirmDelete, isLoa
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-gray-400 flex-shrink-0">{relativeDate(job.createdAt)}</span>
 
-        {job.status === 'completed' && (
+        {job.status === 'completed' && !selectMode && (
           <button
-            onClick={() => onView(job)}
+            onClick={(e) => { e.stopPropagation(); onView(job); }}
             disabled={isLoading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B2A4A] text-white text-xs font-medium hover:bg-[#243657] transition-colors disabled:opacity-60 flex-shrink-0"
           >

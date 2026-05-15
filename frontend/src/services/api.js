@@ -115,6 +115,22 @@ export async function getPipelineResult(jobId) {
   return data.data; // { content, metrics, member_responses, ... }
 }
 
+export async function bulkDownload(jobIds, format) {
+  const filenameMap = {
+    excel: 'Combined_Evidence_Report.xlsx',
+    word: 'Combined_Appraisal_Report.docx',
+  };
+  const res = await api.post('/api/v1/exports/bulk', { jobIds, format }, { responseType: 'blob' });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filenameMap[format] ?? 'bulk_export';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function downloadFile(type, jobId) {
   const res = await api.get(`/api/v1/exports/${type}`, {
     params: { jobId },

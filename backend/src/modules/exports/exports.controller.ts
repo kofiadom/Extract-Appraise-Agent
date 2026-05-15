@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards, Res, BadRequestException } from '@nestjs/common';
 import { Response } from 'express';
 import {
   ApiTags,
@@ -11,6 +11,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.interfaces';
 import { ExportsService } from './exports.service';
+import { BulkExportDto } from './dto/bulk-export.dto';
 
 @ApiTags('exports')
 @ApiBearerAuth()
@@ -57,6 +58,27 @@ export class ExportsController {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
     res.setHeader('Content-Disposition', `attachment; filename="appraisal-report-${jobId}.docx"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.end(buffer);
+  }
+
+  @Post('bulk')
+  @ApiOperation({ summary: 'Bulk download: combine multiple job results into one Excel or Word file' })
+  @ApiResponse({ status: 200, description: 'Returns combined .xlsx or .docx file' })
+  @ApiResponse({ status: 400, description: 'No valid completed results found' })
+  async bulkExport(
+    @Body() body: BulkExportDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.exportsService.bulkExport(body.jobIds, user.userId, body.format);
+    if (body.format === 'excel') {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="Combined_Evidence_Report.xlsx"');
+    } else {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', 'attachment; filename="Combined_Appraisal_Report.docx"');
+    }
     res.setHeader('Content-Length', buffer.length);
     res.end(buffer);
   }

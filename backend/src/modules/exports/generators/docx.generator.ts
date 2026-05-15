@@ -25,6 +25,89 @@ const RATING_COLORS: Record<string, string> = {
 
 @Injectable()
 export class DocxGenerator {
+  async generateBulk(docs: { docName: string; appraisals: PaperAppraisal[] }[]): Promise<Buffer> {
+    const children: (Paragraph | Table)[] = [];
+
+    // Combined cover page
+    children.push(
+      new Paragraph({
+        text: 'Quality Appraisal Report',
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 200 },
+      }),
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `REST Evidence Extractor  ·  ${docs.length} Document${docs.length !== 1 ? 's' : ''}  ·  Generated ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+            italics: true,
+            color: '666666',
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 600 },
+      }),
+    );
+
+    docs.forEach((doc, docIdx) => {
+      if (docIdx > 0) {
+        children.push(new Paragraph({ children: [new PageBreak()] }));
+      }
+
+      // Document name as H1
+      children.push(
+        new Paragraph({
+          text: doc.docName,
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 300, after: 200 },
+        }),
+      );
+
+      if (!doc.appraisals || doc.appraisals.length === 0) {
+        children.push(new Paragraph({ text: 'No appraisal results available for this document.', spacing: { after: 200 } }));
+        return;
+      }
+
+      doc.appraisals.forEach((paper, paperIdx) => {
+        if (paperIdx > 0) {
+          children.push(new Paragraph({ children: [new PageBreak()] }));
+        }
+
+        // Article reference as H2 (one level down from document H1)
+        children.push(
+          new Paragraph({
+            text: paper.article_reference,
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 240, after: 120 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Study type: ', bold: true }),
+              new TextRun({ text: paper.study_type ?? 'N/A' }),
+              new TextRun({ text: '    Quality score: ', bold: true }),
+              new TextRun({ text: paper.quality_score ?? 'N/A', bold: true, color: '2F5496', size: 26 }),
+            ],
+            spacing: { after: 160 },
+          }),
+          new Paragraph({ text: 'Strengths', heading: HeadingLevel.HEADING_3, spacing: { before: 200, after: 80 } }),
+          new Paragraph({ text: paper.strengths ?? '', spacing: { after: 160 } }),
+          new Paragraph({ text: 'Limitations', heading: HeadingLevel.HEADING_3, spacing: { before: 200, after: 80 } }),
+          new Paragraph({ text: paper.limitations ?? '', spacing: { after: 200 } }),
+          new Paragraph({ text: 'Appraisal Criteria', heading: HeadingLevel.HEADING_3, spacing: { before: 240, after: 120 } }),
+        );
+
+        children.push(this.buildCriteriaTable(paper));
+      });
+    });
+
+    const doc = new Document({
+      styles: { paragraphStyles: [{ id: 'Normal', name: 'Normal', run: { font: 'Calibri', size: 22 } }] },
+      sections: [{ children }],
+    });
+
+    return Packer.toBuffer(doc);
+  }
+
   async generate(appraisals: PaperAppraisal[]): Promise<Buffer> {
     const children: (Paragraph | Table)[] = [];
 
