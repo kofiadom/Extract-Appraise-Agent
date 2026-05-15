@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   BookOpen, ClipboardList, Download, FileText, ArrowLeft, Loader2, AlertCircle, X,
 } from 'lucide-react';
@@ -22,7 +22,10 @@ const TABS = [
 
 export default function ResultsPage({ sidebarOpen }) {
   const { jobId } = useParams();
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  // File object passed from UploadPage via navigate state (available for fresh runs)
+  const inMemoryFile = location.state?.file ?? null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -66,17 +69,38 @@ export default function ResultsPage({ sidebarOpen }) {
     return () => { cancelled = true; };
   }, [jobId]);
 
-  // Probe for PDF availability — if the backend serves it, show the "View PDF" button
+  // Resolve PDF URL:
+  //   1. If we have the File in memory (fresh run from UploadPage) → use it immediately
+  //   2. Otherwise probe the backend endpoint (works for new history runs with fileMapping)
   useEffect(() => {
     let cancelled = false;
+
+    // Cleanup previous URL
+    if (pdfUrlRef.current) {
+      URL.revokeObjectURL(pdfUrlRef.current);
+      pdfUrlRef.current = null;
+    }
+
+    if (inMemoryFile) {
+      const url = URL.createObjectURL(inMemoryFile);
+      pdfUrlRef.current = url;
+      setPdfUrl(url);
+      return () => {
+        cancelled = true;
+        URL.revokeObjectURL(url);
+        pdfUrlRef.current = null;
+      };
+    }
+
+    // No in-memory file — try fetching from backend (history runs)
     async function probePdf() {
       try {
         const url = await getPipelinePdf(jobId);
         if (cancelled) { URL.revokeObjectURL(url); return; }
-        setPdfUrl(url);
         pdfUrlRef.current = url;
+        setPdfUrl(url);
       } catch {
-        // PDF not available for this job (old job without fileMapping, or file deleted)
+        // PDF not available (old job without fileMapping, or file deleted) — hide button
       }
     }
     probePdf();
@@ -87,7 +111,7 @@ export default function ResultsPage({ sidebarOpen }) {
         pdfUrlRef.current = null;
       }
     };
-  }, [jobId]);
+  }, [jobId, inMemoryFile]);
 
   // Resizable divider
   const handleDividerMouseDown = useCallback((e) => {
@@ -263,7 +287,9 @@ export default function ResultsPage({ sidebarOpen }) {
             {/* PDF toolbar */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-white border-b border-gray-200 flex-shrink-0">
               <FileText size={14} className="text-gray-400 flex-shrink-0" />
-              <p className="flex-1 text-xs font-medium text-gray-700 truncate">PDF Preview</p>
+              <p className="flex-1 text-xs font-medium text-gray-700 truncate" title={inMemoryFile?.name}>
+                {inMemoryFile?.name ?? 'PDF Preview'}
+              </p>
               <button
                 onClick={() => setShowPdf(false)}
                 className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"

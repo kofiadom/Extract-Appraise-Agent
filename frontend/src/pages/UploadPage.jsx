@@ -34,6 +34,8 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [selectedSteps, setSelectedSteps] = useState(['extraction', 'appraisal']);
   const [duplicates, setDuplicates] = useState([]);
+  // Map jobId → File so the results page can show the PDF without a backend round-trip
+  const jobFileMapRef = useRef({});
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -84,6 +86,8 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
       if (isSingleFile) {
         const jobId = await startPipelineJob(markdownFiles, selectedSteps, fileMapping);
         if (!mountedRef.current) return;
+        // Store file reference so we can pass it to the results page
+        jobFileMapRef.current[jobId] = files[0];
         setCurrentJobId(jobId);
         setDocStatuses([{
           jobId,
@@ -117,11 +121,16 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
 
         if (!mountedRef.current) return;
         if (lastJob.status === 'failed') throw new Error(lastJob.error || 'Pipeline failed.');
-        navigate(`/results/${jobId}`);
+        navigate(`/results/${jobId}`, { state: { file: jobFileMapRef.current[jobId] ?? null } });
 
       } else {
         const batchJobs = await startPipelineBatch(markdownFiles, selectedSteps, fileMapping);
         if (!mountedRef.current) return;
+
+        // Map each jobId to the File that was uploaded (same order as markdownFiles)
+        batchJobs.forEach((j, i) => {
+          jobFileMapRef.current[j.jobId] = files[i] ?? null;
+        });
 
         const initial = batchJobs.map((j) => ({
           jobId: j.jobId,
@@ -335,7 +344,9 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
             <DocumentProgressList
               docStatuses={docStatuses}
               allDone={phase === 'done'}
-              onViewResult={(jobId) => navigate(`/results/${jobId}`)}
+              onViewResult={(jobId) =>
+                navigate(`/results/${jobId}`, { state: { file: jobFileMapRef.current[jobId] ?? null } })
+              }
             />
           </div>
         )}

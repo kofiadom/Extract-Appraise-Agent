@@ -58,7 +58,7 @@ export default function ChatPage({ sidebarOpen }) {
       if (!isDragging.current || !mainRef.current) return;
       const w = mainRef.current.getBoundingClientRect().width;
       const delta = ((e.clientX - dragStartX.current) / w) * 100;
-      setPdfWidthPct(Math.min(60, Math.max(25, dragStartPct.current + delta)));
+      setPdfWidthPct(Math.min(60, Math.max(25, dragStartPct.current - delta)));
     }
     function onMouseUp() {
       if (!isDragging.current) return;
@@ -82,11 +82,37 @@ export default function ChatPage({ sidebarOpen }) {
       className="flex-1 flex overflow-hidden h-screen"
       style={{ marginLeft }}
     >
-      {/* ── PDF Panel (left) ── */}
+      {/* ── Chat Panel (left) ── */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-8 py-10">
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Chat with Your Document</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Index any PDF with PageIndex and ask questions using vectorless, reasoning-based retrieval.
+            </p>
+          </div>
+          <ChatWithDoc onFileSelected={handleFileSelected} />
+        </div>
+      </div>
+
+      {/* ── Resizable divider + PDF Panel (right) ── */}
       {showPdf && pdfUrl && (
         <>
           <div
-            className="flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200"
+            onMouseDown={handleDividerMouseDown}
+            className="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-[#1B2A4A]/20 active:bg-[#1B2A4A]/40 transition-colors relative group"
+            style={{ background: '#E2E8F0' }}
+            title="Drag to resize"
+          >
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="w-1 h-1 rounded-full bg-gray-400" />
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="flex-shrink-0 flex flex-col bg-gray-50 border-l border-gray-200"
             style={{ width: `${pdfWidthPct}%` }}
           >
             {/* PDF toolbar */}
@@ -113,35 +139,8 @@ export default function ChatPage({ sidebarOpen }) {
               />
             </div>
           </div>
-
-          {/* Resizable divider */}
-          <div
-            onMouseDown={handleDividerMouseDown}
-            className="flex-shrink-0 w-1.5 cursor-col-resize hover:bg-[#1B2A4A]/20 active:bg-[#1B2A4A]/40 transition-colors relative group"
-            style={{ background: '#E2E8F0' }}
-            title="Drag to resize"
-          >
-            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {[0, 1, 2].map((i) => (
-                <span key={i} className="w-1 h-1 rounded-full bg-gray-400" />
-              ))}
-            </div>
-          </div>
         </>
       )}
-
-      {/* ── Chat Panel (right) ── */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-8 py-10">
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Chat with Your Document</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Index any PDF with PageIndex and ask questions using vectorless, reasoning-based retrieval.
-            </p>
-          </div>
-          <ChatWithDoc onFileSelected={handleFileSelected} />
-        </div>
-      </div>
     </main>
   );
 }
