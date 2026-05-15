@@ -64,19 +64,30 @@ export class PipelineService {
     const targetMd = mdFile ?? markdownFiles[0];
     if (!targetMd) throw new NotFoundException('No files associated with this job');
 
-    const originalName = fileMapping[targetMd];
-    if (!originalName) throw new NotFoundException('PDF not found — this job predates PDF tracking');
+    const stored = fileMapping[targetMd];
+    if (!stored) throw new NotFoundException('PDF not found — this job predates PDF tracking');
 
-    const isDocker = fs.existsSync('/.dockerenv');
-    const defaultDir = isDocker
-      ? '/app/tmp/papers_fs'
-      : path.resolve(process.cwd(), '../tmp/papers_fs');
-    const papersDir = path.resolve(this.config.get<string>('PAPERS_FS_DIR') ?? defaultDir);
-    const filePath = path.resolve(papersDir, originalName);
+    let filePath: string;
+    let originalName: string;
 
-    if (!filePath.startsWith(papersDir + path.sep) && filePath !== papersDir) {
-      throw new BadRequestException('Invalid file path');
+    if (path.isAbsolute(stored)) {
+      // New format: absolute path stored directly from FastAPI response
+      filePath = stored;
+      originalName = path.basename(stored);
+    } else {
+      // Legacy format: bare filename stored before absolute-path fix
+      const isDocker = fs.existsSync('/.dockerenv');
+      const defaultDir = isDocker
+        ? '/app/tmp/papers_fs'
+        : path.resolve(process.cwd(), '../tmp/papers_fs');
+      const papersDir = path.resolve(this.config.get<string>('PAPERS_FS_DIR') ?? defaultDir);
+      filePath = path.resolve(papersDir, stored);
+      originalName = stored;
+      if (!filePath.startsWith(papersDir + path.sep) && filePath !== papersDir) {
+        throw new BadRequestException('Invalid file path');
+      }
     }
+
     if (!fs.existsSync(filePath)) {
       throw new NotFoundException('PDF file no longer exists on disk');
     }

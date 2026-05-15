@@ -18,12 +18,12 @@ export class PapersService {
       throw new BadRequestException(`Maximum ${maxDocs} documents allowed per run`);
     }
 
-    const { markdownFiles } = await this.fastApi.uploadFiles(files, userId);
+    const { files: storedPaths, markdownFiles } = await this.fastApi.uploadFiles(files, userId);
 
-    // Map each markdownFile back to the original uploaded filename (same order)
+    // Map each markdownFile → absolute path returned by FastAPI for reliable PDF serving
     const fileMapping: Record<string, string> = {};
     markdownFiles.forEach((md, i) => {
-      fileMapping[md] = files[i]?.originalname ?? md;
+      fileMapping[md] = storedPaths[i] ?? files[i]?.originalname ?? md;
     });
 
     return { markdownFiles, fileMapping };
