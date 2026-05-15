@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertCircle, RefreshCw, BookOpen } from 'lucide-react';
 import StepIndicator from '../components/StepIndicator.jsx';
 import UploadZone from '../components/UploadZone.jsx';
@@ -26,6 +26,7 @@ function toDisplayName(fileName) {
 
 export default function UploadPage({ onPhaseChange, sidebarOpen }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [phase, setPhase] = useState('idle');
   const [files, setFiles] = useState([]);
   const [markdownFiles, setMarkdownFiles] = useState([]);
@@ -42,6 +43,16 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
+  }, []);
+
+  // Restore "done" phase when user navigates back from a batch result
+  useEffect(() => {
+    const restore = location.state?._restoreUpload;
+    if (restore?.docStatuses?.length > 0) {
+      setDocStatuses(restore.docStatuses);
+      setPhase('done');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync phase up to App layout (for sidebar status indicator)
@@ -346,7 +357,12 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
               docStatuses={docStatuses}
               allDone={phase === 'done'}
               onViewResult={(jobId) =>
-                navigate(`/results/${jobId}`, { state: { file: jobFileMapRef.current[jobId] ?? null } })
+                navigate(`/results/${jobId}`, {
+                  state: {
+                    file: jobFileMapRef.current[jobId] ?? null,
+                    _fromUploadDone: { docStatuses },
+                  },
+                })
               }
             />
           </div>

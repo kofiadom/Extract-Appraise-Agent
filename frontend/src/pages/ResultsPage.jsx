@@ -228,7 +228,10 @@ export default function ResultsPage({ sidebarOpen }) {
           {/* Back button + title */}
           <div className="mb-6 flex items-center gap-3">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => {
+                const fromDone = location.state?._fromUploadDone;
+                navigate('/', fromDone ? { state: { _restoreUpload: fromDone } } : undefined);
+              }}
               className="flex items-center gap-1.5 text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors flex-shrink-0"
             >
               <ArrowLeft size={15} />
