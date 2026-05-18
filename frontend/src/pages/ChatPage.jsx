@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { FileText, X } from 'lucide-react';
 import ChatWithDoc from '../components/ChatWithDoc.jsx';
 
+
 export default function ChatPage({ sidebarOpen }) {
   const [pdfFile, setPdfFile]         = useState(null);   // File object from just-indexed upload
   const [pdfUrl, setPdfUrl]           = useState(null);   // blob URL derived from pdfFile
@@ -85,28 +86,18 @@ export default function ChatPage({ sidebarOpen }) {
       {/* ── Chat Panel (left) ── */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-8 py-10">
-          <div className="mb-8 flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Chat with Your Document</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Upload a PDF and ask questions about its content.
-              </p>
-            </div>
-            {pdfUrl && (
-              <button
-                onClick={() => setShowPdf((v) => !v)}
-                className={`flex-shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all duration-150 ${
-                  showPdf
-                    ? 'bg-[#1B2A4A] text-white border-[#1B2A4A]'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                <FileText size={14} />
-                {showPdf ? 'Hide PDF' : 'View PDF'}
-              </button>
-            )}
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Chat with Your Document</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Upload a PDF and ask questions about its content.
+            </p>
           </div>
-          <ChatWithDoc onFileSelected={handleFileSelected} />
+          <ChatWithDoc
+            onFileSelected={handleFileSelected}
+            pdfUrl={pdfUrl}
+            showPdf={showPdf}
+            onTogglePdf={() => setShowPdf((v) => !v)}
+          />
         </div>
       </div>
 

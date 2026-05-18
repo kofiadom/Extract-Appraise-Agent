@@ -71,7 +71,7 @@ function MessageBubble({ msg }) {
   );
 }
 
-export default function ChatWithDoc({ onFileSelected }) {
+export default function ChatWithDoc({ onFileSelected, pdfUrl, showPdf, onTogglePdf }) {
   const [documents, setDocuments] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [docDropdownOpen, setDocDropdownOpen] = useState(false);
@@ -304,6 +304,21 @@ export default function ChatWithDoc({ onFileSelected }) {
           className="hidden"
           onChange={handleFileSelect}
         />
+
+        {pdfUrl && (
+          <button
+            onClick={onTogglePdf}
+            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-150 ${
+              showPdf
+                ? 'bg-[#1B2A4A] text-white border-[#1B2A4A]'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+            }`}
+            title={showPdf ? 'Hide PDF' : 'View PDF'}
+          >
+            <FileText size={13} />
+            {showPdf ? 'Hide PDF' : 'View PDF'}
+          </button>
+        )}
 
         {messages.length > 0 && (
           <button

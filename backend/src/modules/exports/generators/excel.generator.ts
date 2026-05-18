@@ -38,8 +38,6 @@ export class ExcelGenerator {
     });
     summaryHeader.height = 28;
 
-    const usedNames = new Set<string>(['Summary']);
-
     docs.forEach((doc, idx) => {
       const summaryRow = summary.addRow([doc.docName, doc.papers.length]);
       const sumBg = idx % 2 === 0 ? 'FFEEF3FB' : 'FFFFFFFF';
@@ -49,31 +47,39 @@ export class ExcelGenerator {
         cell.border = { top: { style: 'hair' }, left: { style: 'thin' }, bottom: { style: 'hair' }, right: { style: 'thin' } };
       });
       summaryRow.height = 22;
+    });
 
-      // Derive unique sheet name (Excel limit: 31 chars)
-      let sheetName = doc.docName.slice(0, 28);
-      if (usedNames.has(sheetName)) {
-        let n = 2;
-        while (usedNames.has(`${sheetName} (${n})`)) n++;
-        sheetName = `${sheetName} (${n})`;
-      }
-      usedNames.add(sheetName);
+    // ── Single combined Evidence sheet ─────────────────────────────────────────
+    const sheet = workbook.addWorksheet('Evidence', {
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+    });
+    sheet.columns = HEADERS.map((header, i) => ({ header, key: header, width: COL_WIDTHS[i] }));
 
-      // ── Evidence sheet for this document ──────────────────────────────────
-      const sheet = workbook.addWorksheet(sheetName, {
-        pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
-      });
-      sheet.columns = HEADERS.map((header, i) => ({ header, key: header, width: COL_WIDTHS[i] }));
+    // Freeze the first row (column headers)
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
 
-      const headerRow = sheet.getRow(1);
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      });
-      headerRow.height = 30;
+    const colHeaderRow = sheet.getRow(1);
+    colHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    });
+    colHeaderRow.height = 30;
 
+    docs.forEach((doc, docIdx) => {
+      // Document section header row spanning all columns
+      const sectionRow = sheet.addRow([doc.docName]);
+      sectionRow.height = 24;
+      const sectionCell = sectionRow.getCell(1);
+      sectionCell.value = doc.docName;
+      sectionCell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+      sectionCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B3A6B' } };
+      sectionCell.alignment = { vertical: 'middle' };
+      // Merge across all columns
+      sheet.mergeCells(sectionRow.number, 1, sectionRow.number, HEADERS.length);
+
+      // Paper rows for this document
       doc.papers.forEach((paper, pIdx) => {
         const row = sheet.addRow([
           paper.article_reference ?? '',
@@ -95,7 +101,11 @@ export class ExcelGenerator {
         row.height = 60;
       });
 
-      sheet.views = [{ state: 'frozen', ySplit: 1 }];
+      // Two blank spacer rows between documents (skip after the last one)
+      if (docIdx < docs.length - 1) {
+        sheet.addRow([]);
+        sheet.addRow([]);
+      }
     });
 
     const raw = await workbook.xlsx.writeBuffer();

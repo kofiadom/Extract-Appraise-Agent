@@ -240,9 +240,9 @@ export default function ResultsPage({ sidebarOpen }) {
                 const fromDone = location.state?._fromUploadDone;
                 navigate('/', fromDone ? { state: { _restoreUpload: fromDone } } : undefined);
               }}
-              className="flex items-center gap-1.5 text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors flex-shrink-0"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B2A4A] text-white text-sm font-medium hover:bg-[#243657] transition-colors flex-shrink-0 shadow-sm"
             >
-              <ArrowLeft size={15} />
+              <ArrowLeft size={14} />
               Back
             </button>
             <span className="text-gray-200 flex-shrink-0">|</span>
