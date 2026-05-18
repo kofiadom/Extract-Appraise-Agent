@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { User } from '../entities/user.entity';
 import { PipelineJob } from '../entities/pipeline-job.entity';
 import { IndexedDocument } from '../entities/indexed-document.entity';
+import { UserTemplate } from '../entities/user-template.entity';
 
 dotenv.config();
 
@@ -18,7 +19,7 @@ export default new DataSource({
   username: process.env.DB_USERNAME || 'postgres',
   password: process.env.DB_PASSWORD ?? (() => { throw new Error('DB_PASSWORD env var is required'); })(),
   database: process.env.DB_NAME || 'agno_rag',
-  entities: [User, PipelineJob, IndexedDocument],
+  entities: [User, PipelineJob, IndexedDocument, UserTemplate],
   migrations: ['dist/migrations/*.js'],
   synchronize: false,
 });

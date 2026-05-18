@@ -80,8 +80,10 @@ export async function checkExistingResults(markdownFiles) {
 }
 
 /** Legacy: submit all files in one job. */
-export async function startPipelineJob(markdownFiles, steps, fileMapping) {
-  const { data } = await api.post('/api/v1/pipeline/run', { markdownFiles, steps, fileMapping });
+export async function startPipelineJob(markdownFiles, steps, fileMapping, templateId) {
+  const { data } = await api.post('/api/v1/pipeline/run', {
+    markdownFiles, steps, fileMapping, ...(templateId ? { templateId } : {}),
+  });
   return data.data.jobId;
 }
 
@@ -89,8 +91,10 @@ export async function startPipelineJob(markdownFiles, steps, fileMapping) {
  * Submit one independent pipeline job per file.
  * Returns an array of { jobId, fileName, status } objects.
  */
-export async function startPipelineBatch(markdownFiles, steps, fileMapping) {
-  const { data } = await api.post('/api/v1/pipeline/run-batch', { markdownFiles, steps, fileMapping });
+export async function startPipelineBatch(markdownFiles, steps, fileMapping, templateId) {
+  const { data } = await api.post('/api/v1/pipeline/run-batch', {
+    markdownFiles, steps, fileMapping, ...(templateId ? { templateId } : {}),
+  });
   return data.data; // [{ jobId, fileName, status }, ...]
 }
 
@@ -266,6 +270,47 @@ export async function chatQueryStream(docId, message, sessionId, callbacks = {})
   }
 
   onDone?.();
+}
+
+// ── BYOT Templates ───────────────────────────────────────────────────────────
+
+export async function parseTemplates(extractionFile, appraisalFile) {
+  const fd = new FormData();
+  if (extractionFile) fd.append('extraction_template', extractionFile);
+  if (appraisalFile) fd.append('appraisal_template', appraisalFile);
+  const { data } = await api.post('/api/v1/templates/parse', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data.data.fastapiJobId;
+}
+
+export async function pollByotJob(fastapiJobId) {
+  const { data } = await api.get(`/api/v1/templates/parse-job/${fastapiJobId}`);
+  return data.data; // { status, result? }
+}
+
+export async function saveTemplate(name, extractionTemplate, appraisalTemplate, sourceFiles) {
+  const { data } = await api.post('/api/v1/templates', {
+    name,
+    extractionTemplate,
+    appraisalTemplate,
+    sourceFiles: sourceFiles ?? {},
+  });
+  return data.data;
+}
+
+export async function listTemplates() {
+  const { data } = await api.get('/api/v1/templates');
+  return data.data; // [{ id, name, sourceFiles, createdAt }]
+}
+
+export async function getTemplate(id) {
+  const { data } = await api.get(`/api/v1/templates/${id}`);
+  return data.data;
+}
+
+export async function deleteTemplate(id) {
+  await api.delete(`/api/v1/templates/${id}`);
 }
 
 // ── Job history ───────────────────────────────────────────────────────────────

@@ -6,13 +6,20 @@ This agent reads the pre-converted .md files using FileTools and extracts
 structured evidence — no Docling, no vector database required.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from string import Template
+from typing import TYPE_CHECKING
 
 from agno.agent import Agent
 from agno.models.aws import AwsBedrock
 from agno.tools.file import FileTools
 
 from core.schemas import VALID_STUDY_TYPES
+
+if TYPE_CHECKING:
+    from core.byot_schemas import ExtractionTemplate
 
 # Directory where /upload-fs saves the LlamaParse-converted markdown files
 FS_MARKDOWN_DIR = Path("tmp/papers_fs_md")
@@ -84,10 +91,66 @@ EXTRACTION_PROMPT_FS = (
 )
 
 # ---------------------------------------------------------------------------
+# Custom-template prompt builders (BYOT feature)
+# ---------------------------------------------------------------------------
+
+_EXTRACTION_INSTRUCTIONS_TEMPLATE = Template("""You are a specialist evidence extractor for the Rapid Evidence Synthesis Team (REST).
+
+WORKFLOW — follow these steps exactly for each markdown filename provided:
+1. Call read_file(file_name="<filename>.md") to read the full paper content.
+2. Extract ALL required fields from the content returned by read_file.
+
+Your task is to extract structured information from academic papers.
+For each paper, you MUST extract ALL of the following fields:
+
+$fields_block
+
+IMPORTANT RULES:
+- Always call read_file for each markdown filename BEFORE extracting fields.
+- Extract information ONLY from what is in the paper — do not fabricate data.
+- If a field cannot be determined from the paper, write "Not reported".
+- Be thorough but concise — decision-makers will read this. Don't be too wordy.
+- If multiple markdown files are provided, process and extract evidence for EACH paper separately.
+- IMPORTANT: Your final output MUST be a valid JSON object with a single 'papers' key containing the list of extracted evidence. DO NOT output a raw list.
+""")
+
+_EXTRACTION_PROMPT_TEMPLATE = Template(
+    "For each markdown filename provided: call read_file to read the full paper content, "
+    "then extract structured evidence from ALL papers. "
+    "You MUST respond with ONLY a valid JSON object — no prose, no markdown, no explanation. "
+    "The JSON must match this exact structure:\n"
+    "$json_structure"
+)
+
+
+def build_extraction_instructions(template: ExtractionTemplate) -> str:
+    """Build extraction system instructions from a custom BYOT template."""
+    fields_block = "\n\n".join(
+        f"{i + 1}. **{f.name}**: {f.description}\n   Rule: {f.instructions}"
+        for i, f in enumerate(template.fields)
+    )
+    return _EXTRACTION_INSTRUCTIONS_TEMPLATE.substitute(fields_block=fields_block)
+
+
+def build_extraction_prompt(template: ExtractionTemplate) -> str:
+    """Build the extraction runtime prompt from a custom BYOT template."""
+    json_keys = ", ".join(
+        f'"{f.name.lower().replace(" ", "_")}": "..."'
+        for f in template.fields
+    )
+    json_structure = '{"papers": [{' + json_keys + "}]}"
+    return _EXTRACTION_PROMPT_TEMPLATE.substitute(json_structure=json_structure)
+
+
+# ---------------------------------------------------------------------------
 # Factory function
 # ---------------------------------------------------------------------------
 
-def create_filesearch_extraction_agent(model_id: str = "zai.glm-5", db=None) -> Agent:
+def create_filesearch_extraction_agent(
+    model_id: str = "zai.glm-5",
+    db=None,
+    custom_instructions: str | None = None,
+) -> Agent:
     """
     Create a FileSearch extraction agent that reads pre-converted markdown files.
 
@@ -103,6 +166,7 @@ def create_filesearch_extraction_agent(model_id: str = "zai.glm-5", db=None) -> 
         A configured Agent instance ready to accept run messages.
     """
     FS_MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
+    instructions = custom_instructions if custom_instructions is not None else EXTRACTION_INSTRUCTIONS_FS
     return Agent(
         id="fs-extraction-agent",
         name="FileSearch Extraction Agent",
@@ -120,7 +184,7 @@ def create_filesearch_extraction_agent(model_id: str = "zai.glm-5", db=None) -> 
                 enable_search_content=False,
             ),
         ],
-        instructions=[EXTRACTION_INSTRUCTIONS_FS],
+        instructions=[instructions],
         markdown=False,
         debug_mode=True,
         db=db,

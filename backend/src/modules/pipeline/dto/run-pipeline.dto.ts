@@ -31,4 +31,12 @@ export class RunPipelineDto {
   @IsOptional()
   @IsObject()
   fileMapping?: Record<string, string>;
+
+  @ApiProperty({
+    description: 'ID of a saved BYOT template to use for extraction and appraisal',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  templateId?: string;
 }

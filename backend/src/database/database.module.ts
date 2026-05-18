@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User } from '../entities/user.entity';
 import { PipelineJob } from '../entities/pipeline-job.entity';
 import { IndexedDocument } from '../entities/indexed-document.entity';
+import { UserTemplate } from '../entities/user-template.entity';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { IndexedDocument } from '../entities/indexed-document.entity';
         username: config.get<string>('DB_USERNAME', 'postgres'),
         password: config.getOrThrow<string>('DB_PASSWORD'),
         database: config.get<string>('DB_NAME', 'agno_rag'),
-        entities: [User, PipelineJob, IndexedDocument],
+        entities: [User, PipelineJob, IndexedDocument, UserTemplate],
         synchronize: true,
         logging: config.get<string>('NODE_ENV') === 'development',
       }),

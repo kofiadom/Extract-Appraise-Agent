@@ -14,6 +14,7 @@ import { HealthModule } from './modules/health/health.module';
 import { FastApiModule } from './modules/fastapi/fastapi.module';
 import { PapersModule } from './modules/papers/papers.module';
 import { PipelineModule } from './modules/pipeline/pipeline.module';
+import { TemplatesModule } from './modules/templates/templates.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { CleanupModule } from './modules/cleanup/cleanup.module';
@@ -57,6 +58,7 @@ import { RedisConfigService } from './config/redis.config';
     ProcessingModule,
     PapersModule,
     PipelineModule,
+    TemplatesModule,
     ExportsModule,
     ChatModule,
     CleanupModule,

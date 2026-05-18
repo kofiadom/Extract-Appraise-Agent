@@ -59,6 +59,7 @@ export class FastApiService {
     userId: string,
     sessionId: string,
     steps?: string[],
+    template?: Record<string, unknown> | null,
   ): Promise<string> {
     try {
       const { data } = await this.http.post('/pipeline/run-async', {
@@ -66,11 +67,60 @@ export class FastApiService {
         user_id: userId,
         session_id: sessionId,
         steps,
+        ...(template ? { template } : {}),
       });
       return data.job_id as string;
     } catch (error) {
       this.logger.error('FastAPI pipeline start failed:', error);
       throw new InternalServerErrorException('AI pipeline start failed');
+    }
+  }
+
+  // ─── BYOT Template Parsing ────────────────────────────────────────────────────
+
+  async startByotParsing(
+    extractionFile: Express.Multer.File | undefined,
+    appraisalFile: Express.Multer.File | undefined,
+    userId: string,
+  ): Promise<string> {
+    const form = new FormData();
+    form.append('user_id', userId);
+    if (extractionFile) {
+      form.append('extraction_template', extractionFile.buffer, {
+        filename: extractionFile.originalname,
+        contentType: extractionFile.mimetype,
+      });
+    }
+    if (appraisalFile) {
+      form.append('appraisal_template', appraisalFile.buffer, {
+        filename: appraisalFile.originalname,
+        contentType: appraisalFile.mimetype,
+      });
+    }
+    try {
+      const { data } = await this.http.post('/byot/upload-templates', form, {
+        headers: form.getHeaders(),
+        timeout: this.getTimeout('FASTAPI_UPLOAD_TIMEOUT_MS', 10 * 60 * 1000),
+      });
+      return data.job_id as string;
+    } catch (error) {
+      this.logger.error('FastAPI BYOT upload failed:', error);
+      throw new InternalServerErrorException('Template upload to AI service failed');
+    }
+  }
+
+  async pollByotJob(
+    fastapiJobId: string,
+  ): Promise<{ status: string; result?: Record<string, unknown> }> {
+    try {
+      const { data } = await this.http.get(`/byot/job/${fastapiJobId}`);
+      return {
+        status: data.status as string,
+        result: data.result as Record<string, unknown> | undefined,
+      };
+    } catch (error) {
+      this.logger.error(`FastAPI BYOT poll failed for job ${fastapiJobId}:`, error);
+      throw new InternalServerErrorException('BYOT job status check failed');
     }
   }
 

@@ -48,9 +48,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from agno.db.postgres import PostgresDb
 from agno.os import AgentOS
 
-from agents.extraction_agent import create_filesearch_extraction_agent, EXTRACTION_PROMPT_FS
-from agents.appraisal_agent import create_filesearch_appraisal_agent, APPRAISAL_STANDALONE_PROMPT_FS
+from agents.extraction_agent import (
+    create_filesearch_extraction_agent,
+    EXTRACTION_PROMPT_FS,
+    build_extraction_instructions,
+    build_extraction_prompt,
+)
+from agents.appraisal_agent import (
+    create_filesearch_appraisal_agent,
+    APPRAISAL_STANDALONE_PROMPT_FS,
+    build_appraisal_instructions,
+    build_appraisal_prompt,
+)
+from agents.byot_agent import create_byot_agent, BYOT_PROMPT_TEMPLATE
 from agents.chat_agent import create_chat_agent
+from core.byot_schemas import ExtractionTemplate, AppraisalTemplate
 
 logger = logging.getLogger(__name__)
 # Uvicorn leaves root at WARNING; give our logger its own handler so INFO shows.
@@ -77,6 +89,10 @@ logging.getLogger("agno").addFilter(_TruncateFilter())
 
 DEFAULT_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "zai.glm-5")
 APPRAISAL_MODEL_ID = os.getenv("APPRAISAL_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
+BYOT_MODEL_ID = os.getenv("BYOT_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
+
+BYOT_TEMPLATES_DIR = Path("tmp/byot_templates")
+BYOT_MARKDOWN_DIR = Path("tmp/byot_templates_md")
 
 # ── PageIndex (Chat with Doc — self-hosted) ────────────────────────────────────
 # Uses the local pageindex/ package. Tree indexing runs via boto3 → Bedrock.
@@ -129,6 +145,8 @@ chat_agent = create_chat_agent(get_pageindex_client, DEFAULT_MODEL_ID, db=postgr
 _pipeline_jobs: dict = {}
 
 _index_jobs: dict = {}
+
+_byot_jobs: dict = {}
 
 # ── Concurrent pipeline limiter ────────────────────────────────────────────────
 # Each pipeline job can make multiple Bedrock API calls for extraction and appraisal.
@@ -239,13 +257,30 @@ def _extract_papers_and_appraisals(node: dict) -> tuple[list, list]:
     return papers, appraisals
 
 
-async def _run_extraction_file(md_filename: str, user_id: str, session_id: str) -> dict:
-    """Run the extraction agent directly for one markdown file."""
-    agent = create_filesearch_extraction_agent(DEFAULT_MODEL_ID, db=postgres_db)
-    message = (
-        f"File: {md_filename}\n\n"
-        f"{EXTRACTION_PROMPT_FS}"
+async def _run_extraction_file(
+    md_filename: str,
+    user_id: str,
+    session_id: str,
+    template: dict | None = None,
+) -> dict:
+    """Run the extraction agent for one markdown file, optionally with a custom template."""
+    if template:
+        try:
+            extraction_tpl = ExtractionTemplate.model_validate(template)
+            instructions = build_extraction_instructions(extraction_tpl)
+            prompt = build_extraction_prompt(extraction_tpl)
+        except Exception as exc:
+            logger.warning("Invalid extraction template, falling back to default: %s", exc)
+            instructions = None
+            prompt = EXTRACTION_PROMPT_FS
+    else:
+        instructions = None  # agent uses its default EXTRACTION_INSTRUCTIONS_FS
+        prompt = EXTRACTION_PROMPT_FS
+
+    agent = create_filesearch_extraction_agent(
+        DEFAULT_MODEL_ID, db=postgres_db, custom_instructions=instructions
     )
+    message = f"File: {md_filename}\n\n{prompt}"
     response = await agent.arun(
         message,
         user_id=user_id,
@@ -255,13 +290,30 @@ async def _run_extraction_file(md_filename: str, user_id: str, session_id: str) 
     return _serialize_run(response)
 
 
-async def _run_appraisal_file(md_filename: str, user_id: str, session_id: str) -> dict:
-    """Run the appraisal agent directly for one markdown file."""
-    agent = create_filesearch_appraisal_agent(APPRAISAL_MODEL_ID, db=postgres_db)
-    message = (
-        f"File: {md_filename}\n\n"
-        f"{APPRAISAL_STANDALONE_PROMPT_FS}"
+async def _run_appraisal_file(
+    md_filename: str,
+    user_id: str,
+    session_id: str,
+    template: dict | None = None,
+) -> dict:
+    """Run the appraisal agent for one markdown file, optionally with a custom template."""
+    if template:
+        try:
+            appraisal_tpl = AppraisalTemplate.model_validate(template)
+            instructions = build_appraisal_instructions(appraisal_tpl)
+            prompt = build_appraisal_prompt(appraisal_tpl)
+        except Exception as exc:
+            logger.warning("Invalid appraisal template, falling back to default: %s", exc)
+            instructions = None
+            prompt = APPRAISAL_STANDALONE_PROMPT_FS
+    else:
+        instructions = None  # agent uses its default APPRAISAL_INSTRUCTIONS_FS
+        prompt = APPRAISAL_STANDALONE_PROMPT_FS
+
+    agent = create_filesearch_appraisal_agent(
+        APPRAISAL_MODEL_ID, db=postgres_db, custom_instructions=instructions
     )
+    message = f"File: {md_filename}\n\n{prompt}"
     response = await agent.arun(
         message,
         user_id=user_id,
@@ -276,6 +328,8 @@ async def _run_one_file_direct(
     user_id: str,
     session_id: str,
     steps: list[str],
+    extraction_template: dict | None = None,
+    appraisal_template: dict | None = None,
 ) -> dict:
     """
     Run requested agents for one file.
@@ -285,9 +339,9 @@ async def _run_one_file_direct(
     """
     runners = []
     if "extraction" in steps:
-        runners.append(("extraction", _run_extraction_file(md_filename, user_id, session_id)))
+        runners.append(("extraction", _run_extraction_file(md_filename, user_id, session_id, extraction_template)))
     if "appraisal" in steps:
-        runners.append(("appraisal", _run_appraisal_file(md_filename, user_id, session_id)))
+        runners.append(("appraisal", _run_appraisal_file(md_filename, user_id, session_id, appraisal_template)))
 
     outcomes = await asyncio.gather(*(runner for _, runner in runners), return_exceptions=True)
 
@@ -328,6 +382,7 @@ async def _run_pipeline_bg(
     user_id: str,
     session_id: str,
     steps: list[str] | None = None,
+    template: dict | None = None,
 ) -> None:
     """
     Run the evidence pipeline for a job, processing files concurrently.
@@ -343,6 +398,13 @@ async def _run_pipeline_bg(
     """
     sem = _get_pipeline_semaphore()
     steps = _normalize_pipeline_steps(steps)
+
+    # Unpack optional BYOT template into per-agent dicts
+    extraction_template: dict | None = template.get("extraction") if template else None
+    appraisal_template: dict | None = template.get("appraisal") if template else None
+    if template:
+        logger.info("Pipeline job %s: using custom BYOT template", job_id)
+
     async with sem:
         file_concurrency = int(os.getenv("FILE_CONCURRENCY", "3"))
         file_sem = asyncio.Semaphore(file_concurrency)
@@ -357,7 +419,11 @@ async def _run_pipeline_bg(
                     "Pipeline job %s: starting file %d/%d — %s",
                     job_id, i + 1, len(markdown_files), md_filename,
                 )
-                return md_filename, await _run_one_file_direct(md_filename, user_id, session_id, steps)
+                return md_filename, await _run_one_file_direct(
+                    md_filename, user_id, session_id, steps,
+                    extraction_template=extraction_template,
+                    appraisal_template=appraisal_template,
+                )
 
         outcomes = await asyncio.gather(
             *[_process_one(i, f) for i, f in enumerate(markdown_files)],
@@ -501,6 +567,7 @@ async def pipeline_run_async(body: dict):
     markdown_files: list[str] = body.get("markdown_files", [])
     user_id: str = body.get("user_id", "")
     session_id: str = body.get("session_id", "")
+    template: dict | None = body.get("template")  # optional BYOT template
     try:
         steps = _normalize_pipeline_steps(body.get("steps"))
     except ValueError as exc:
@@ -509,7 +576,7 @@ async def pipeline_run_async(body: dict):
         raise HTTPException(status_code=400, detail="markdown_files is required.")
     job_id = str(uuid.uuid4())
     _pipeline_jobs[job_id] = {"status": "running"}
-    asyncio.create_task(_run_pipeline_bg(job_id, markdown_files, user_id, session_id, steps))
+    asyncio.create_task(_run_pipeline_bg(job_id, markdown_files, user_id, session_id, steps, template))
     return {"job_id": job_id, "status": "running"}
 
 
@@ -517,6 +584,92 @@ async def pipeline_run_async(body: dict):
 async def pipeline_job_status(job_id: str):
     """Poll the result of an async pipeline job."""
     job = _pipeline_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
+
+
+# ── BYOT — template upload, parse, and job polling ───────────────────────────
+
+async def _run_byot_bg(job_id: str, extraction_md: str, appraisal_md: str) -> None:
+    """Run the BYOT agent in the background to parse uploaded template files."""
+    try:
+        agent = create_byot_agent(BYOT_MODEL_ID, db=postgres_db)
+        filenames = f"{extraction_md}, {appraisal_md}" if appraisal_md else extraction_md
+        message = BYOT_PROMPT_TEMPLATE.format(filenames=filenames)
+        response = await agent.arun(message, stream=False)
+        result = _serialize_run(response)
+
+        # Extract the JSON content from the agent response
+        content = result.get("content", "")
+        stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
+        try:
+            parsed = json.loads(stripped)
+        except Exception:
+            parsed = None
+
+        if parsed and ("extraction" in parsed or "appraisal" in parsed):
+            _byot_jobs[job_id] = {"status": "done", "result": parsed}
+        else:
+            _byot_jobs[job_id] = {"status": "error", "error": "Agent returned unparseable output"}
+    except Exception as exc:
+        logger.error("BYOT job %s failed: %s", job_id, exc)
+        _byot_jobs[job_id] = {"status": "error", "error": str(exc)}
+
+
+@app.post("/byot/upload-templates", tags=["BYOT"])
+async def byot_upload_templates(
+    extraction_template: UploadFile | None = None,
+    appraisal_template: UploadFile | None = None,
+    user_id: str = Form(""),
+):
+    """
+    Upload extraction and/or appraisal template documents (PDF, Word, Excel, CSV).
+    Converts them to markdown via LlamaParse and runs the BYOT agent to extract
+    structured fields/criteria. Returns a job_id to poll for the result.
+    """
+    if not extraction_template and not appraisal_template:
+        raise HTTPException(status_code=400, detail="At least one template file is required.")
+    if not LLAMA_CLOUD_API_KEY:
+        raise HTTPException(status_code=500, detail="LLAMAPARSE_API_KEY not set in .env")
+
+    BYOT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    BYOT_MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
+
+    async def _convert_template(upload: UploadFile, label: str) -> str:
+        prefix = f"{user_id}_" if user_id else ""
+        stem = Path(upload.filename).stem
+        md_filename = f"{prefix}byot_{label}_{stem}.md"
+        md_path = BYOT_MARKDOWN_DIR / md_filename
+
+        dest = BYOT_TEMPLATES_DIR / f"{prefix}byot_{label}_{upload.filename}"
+        dest.write_bytes(await upload.read())
+
+        if not md_path.exists():
+            try:
+                markdown = await parse_pdf_to_markdown(str(dest.resolve()), LLAMA_CLOUD_API_KEY)
+                md_path.write_text(markdown, encoding="utf-8")
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"LlamaParse failed for {upload.filename}: {exc}",
+                ) from exc
+
+        return md_filename
+
+    extraction_md = await _convert_template(extraction_template, "extraction") if extraction_template else ""
+    appraisal_md = await _convert_template(appraisal_template, "appraisal") if appraisal_template else ""
+
+    job_id = str(uuid.uuid4())
+    _byot_jobs[job_id] = {"status": "running"}
+    asyncio.create_task(_run_byot_bg(job_id, extraction_md, appraisal_md))
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/byot/job/{job_id}", tags=["BYOT"])
+async def byot_job_status(job_id: str):
+    """Poll the result of a BYOT template parsing job."""
+    job = _byot_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
     return job

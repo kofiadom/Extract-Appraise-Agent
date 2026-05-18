@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JobsService } from '../jobs/jobs.service';
+import { TemplatesService } from '../templates/templates.service';
 import { JOB_TYPES } from '../../types';
 
 @Injectable()
@@ -12,7 +13,20 @@ export class PipelineService {
   constructor(
     private readonly jobsService: JobsService,
     private readonly config: ConfigService,
+    private readonly templatesService: TemplatesService,
   ) {}
+
+  private async resolveTemplate(
+    userId: string,
+    templateId?: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!templateId) return undefined;
+    const tpl = await this.templatesService.findOne(templateId, userId);
+    return {
+      extraction: tpl.extractionTemplate,
+      appraisal: tpl.appraisalTemplate,
+    };
+  }
 
   /** Legacy: submit all files as a single job (kept for backwards compat). */
   async runPipeline(
@@ -20,11 +34,13 @@ export class PipelineService {
     markdownFiles: string[],
     steps?: string[],
     fileMapping?: Record<string, string>,
+    templateId?: string,
   ): Promise<{ jobId: string; status: string }> {
+    const template = await this.resolveTemplate(userId, templateId);
     return this.jobsService.submitJob({
       userId,
       jobType: JOB_TYPES.PAPER_PIPELINE,
-      data: { markdownFiles, steps, fileMapping: fileMapping ?? {} },
+      data: { markdownFiles, steps, fileMapping: fileMapping ?? {}, template },
     });
   }
 
@@ -38,13 +54,15 @@ export class PipelineService {
     markdownFiles: string[],
     steps?: string[],
     fileMapping?: Record<string, string>,
+    templateId?: string,
   ): Promise<{ jobId: string; fileName: string; status: string }[]> {
+    const template = await this.resolveTemplate(userId, templateId);
     const jobs = await Promise.all(
       markdownFiles.map(async (fileName) => {
         const { jobId, status } = await this.jobsService.submitJob({
           userId,
           jobType: JOB_TYPES.PAPER_PIPELINE,
-          data: { markdownFiles: [fileName], steps, fileMapping: fileMapping ?? {} },
+          data: { markdownFiles: [fileName], steps, fileMapping: fileMapping ?? {}, template },
         });
         return { jobId, fileName, status };
       }),

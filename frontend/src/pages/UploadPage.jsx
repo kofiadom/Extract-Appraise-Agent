@@ -1,10 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { AlertCircle, RefreshCw, BookOpen } from 'lucide-react';
+import { AlertCircle, RefreshCw, BookOpen, FileText, ChevronDown, X } from 'lucide-react';
 import StepIndicator from '../components/StepIndicator.jsx';
 import UploadZone from '../components/UploadZone.jsx';
 import DocumentProgressList from '../components/DocumentProgressList.jsx';
 import BulkDownloadButton from '../components/BulkDownloadButton.jsx';
+import TemplateUploadSection from '../components/TemplateUploadSection.jsx';
+import TemplateReviewModal from '../components/TemplateReviewModal.jsx';
+import SavedTemplatesDrawer from '../components/SavedTemplatesDrawer.jsx';
 import {
   uploadFiles,
   checkExistingResults,
@@ -36,6 +39,15 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [selectedSteps, setSelectedSteps] = useState(['extraction', 'appraisal']);
   const [duplicates, setDuplicates] = useState([]);
+
+  // BYOT template state
+  const [byotEnabled, setByotEnabled] = useState(false);
+  const [parsedTemplate, setParsedTemplate] = useState(null);    // raw agent output
+  const [parsedSourceFiles, setParsedSourceFiles] = useState(null); // { extraction, appraisal }
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [activeTemplate, setActiveTemplate] = useState(null);    // saved { id, name, extractionTemplate, appraisalTemplate }
+  const [showSavedDrawer, setShowSavedDrawer] = useState(false);
+  const [byotError, setByotError] = useState('');
   // Map jobId → File so the results page can show the PDF without a backend round-trip
   const jobFileMapRef = useRef({});
   // Wall-clock start time per jobId so ResultsPage can display elapsed time
@@ -95,10 +107,11 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
     setPhaseAndSync('running');
     setErrorMsg('');
     const isSingleFile = markdownFiles.length === 1;
+    const templateId = activeTemplate?.id;
 
     try {
       if (isSingleFile) {
-        const jobId = await startPipelineJob(markdownFiles, selectedSteps, fileMapping);
+        const jobId = await startPipelineJob(markdownFiles, selectedSteps, fileMapping, templateId);
         if (!mountedRef.current) return;
         // Store file reference and start time so we can pass them to the results page
         jobFileMapRef.current[jobId] = files[0];
@@ -148,7 +161,7 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
         setPhaseAndSync('done');
 
       } else {
-        const batchJobs = await startPipelineBatch(markdownFiles, selectedSteps, fileMapping);
+        const batchJobs = await startPipelineBatch(markdownFiles, selectedSteps, fileMapping, templateId);
         if (!mountedRef.current) return;
 
         const batchStart = Date.now();
@@ -242,6 +255,7 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
     setCurrentJobId(null);
     setSelectedSteps(['extraction', 'appraisal']);
     setDuplicates([]);
+    // Keep activeTemplate — user may want to reuse it for next run
   }, []);
 
   const marginLeft = sidebarOpen ? 260 : 48;
@@ -304,9 +318,103 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
           </div>
         )}
 
+        {/* BYOT modals */}
+        {showReviewModal && parsedTemplate && (
+          <TemplateReviewModal
+            parsed={parsedTemplate}
+            sourceFiles={parsedSourceFiles}
+            onApproved={(saved) => {
+              setActiveTemplate(saved);
+              setShowReviewModal(false);
+              setParsedTemplate(null);
+            }}
+            onCancel={() => { setShowReviewModal(false); setParsedTemplate(null); }}
+          />
+        )}
+        {showSavedDrawer && (
+          <SavedTemplatesDrawer
+            onSelect={(tpl) => { setActiveTemplate(tpl); setShowSavedDrawer(false); }}
+            onClose={() => setShowSavedDrawer(false)}
+          />
+        )}
+
         {/* Upload zone — visible in all phases except running/done */}
         {phase !== 'running' && phase !== 'done' && (
           <div className="card p-6 mb-6">
+            {/* BYOT template section */}
+            <div className="mb-5 pb-5 border-b border-gray-100">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <FileText size={14} className="text-gray-400" />
+                  <h2 className="text-sm font-semibold text-gray-700">Custom Template</h2>
+                  <span className="text-xs text-gray-400">(optional)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {activeTemplate && (
+                    <button
+                      onClick={() => setShowSavedDrawer(true)}
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Switch
+                    </button>
+                  )}
+                  {!activeTemplate && (
+                    <button
+                      onClick={() => setShowSavedDrawer(true)}
+                      className="text-xs text-gray-500 hover:text-gray-700 hover:underline"
+                    >
+                      Load saved
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setByotEnabled((v) => !v); setByotError(''); }}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
+                      transition-colors duration-200 focus:outline-none
+                      ${byotEnabled ? 'bg-[#1B2A4A]' : 'bg-gray-200'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200
+                        ${byotEnabled ? 'translate-x-4' : 'translate-x-0'}`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Active template badge */}
+              {activeTemplate && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
+                  <FileText size={13} className="text-green-600 flex-shrink-0" />
+                  <p className="text-xs font-medium text-green-800 flex-1 truncate">
+                    Template active: {activeTemplate.name}
+                  </p>
+                  <button
+                    onClick={() => setActiveTemplate(null)}
+                    className="flex-shrink-0 p-0.5 hover:bg-green-100 rounded"
+                  >
+                    <X size={12} className="text-green-600" />
+                  </button>
+                </div>
+              )}
+
+              {/* Upload UI */}
+              {byotEnabled && !activeTemplate && (
+                <div className="mt-3 space-y-2">
+                  {byotError && (
+                    <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{byotError}</p>
+                  )}
+                  <TemplateUploadSection
+                    onParsed={(result, srcFiles) => {
+                      setParsedTemplate(result);
+                      setParsedSourceFiles(srcFiles);
+                      setShowReviewModal(true);
+                      setByotEnabled(false);
+                    }}
+                    onError={(msg) => setByotError(msg)}
+                  />
+                </div>
+              )}
+            </div>
+
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Upload Research Papers</h2>
             <UploadZone
               files={files}
