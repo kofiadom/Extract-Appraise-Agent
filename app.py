@@ -601,24 +601,47 @@ async def _run_byot_bg(job_id: str, extraction_md: str, appraisal_md: str) -> No
         result = _serialize_run(response)
 
         # Extract the JSON content from the agent response.
-        # Use _json_candidates_from_result so we search top-level content AND
-        # any nested member_responses (tool-using agents often place the final
-        # text there rather than at the root).
+        # The content may contain preamble text before the JSON code fence, so
+        # we search for ```json ... ``` first, then fall back to the first { … }
+        # span, trying all content locations (including member_responses).
         parsed = None
+        all_texts: list[str] = []
         for candidate in _json_candidates_from_result(result):
-            try:
-                data = candidate if isinstance(candidate, (dict, list)) else json.loads(str(candidate).strip())
-            except Exception:
-                continue
-            if isinstance(data, dict) and ("extraction" in data or "appraisal" in data):
-                parsed = data
-                break
+            if isinstance(candidate, dict):
+                if "extraction" in candidate or "appraisal" in candidate:
+                    parsed = candidate
+                    break
+            elif isinstance(candidate, str):
+                all_texts.append(candidate)
+
+        if not parsed:
+            for text in all_texts:
+                # Strategy 1: extract the block between ```json ... ```
+                fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+                if fence_match:
+                    try:
+                        data = json.loads(fence_match.group(1))
+                        if isinstance(data, dict) and ("extraction" in data or "appraisal" in data):
+                            parsed = data
+                            break
+                    except Exception:
+                        pass
+                # Strategy 2: find the outermost { … } span in the text
+                try:
+                    start = text.index("{")
+                    end = text.rindex("}") + 1
+                    data = json.loads(text[start:end])
+                    if isinstance(data, dict) and ("extraction" in data or "appraisal" in data):
+                        parsed = data
+                        break
+                except Exception:
+                    pass
 
         if parsed:
             _byot_jobs[job_id] = {"status": "done", "result": parsed}
         else:
-            raw_content = result.get("content", "") or ""
-            logger.error("BYOT job %s: unparseable output (first 500 chars): %s", job_id, raw_content[:500])
+            sample = (all_texts[0][:500] if all_texts else result.get("content", "") or "")
+            logger.error("BYOT job %s: unparseable output (first 500 chars): %s", job_id, sample)
             _byot_jobs[job_id] = {"status": "error", "error": "Agent returned unparseable output"}
     except Exception as exc:
         logger.error("BYOT job %s failed: %s", job_id, exc)
