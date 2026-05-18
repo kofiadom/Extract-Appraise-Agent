@@ -93,12 +93,10 @@ export class ChatController {
     @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
-    const filePath = await this.chatService.getPdfPath(docId, user.userId);
-    const fs = await import('fs');
-    const path = await import('path');
+    const { buffer, filename } = await this.chatService.getChatPdf(docId, user.userId);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(path.basename(filePath))}"`);
-    fs.createReadStream(filePath).pipe(res);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
+    res.end(buffer);
   }
 
   @Delete('documents/:docId')

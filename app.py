@@ -512,11 +512,18 @@ async def _run_index_bg(job_id: str, pdf_path: str) -> None:
         client = get_pageindex_client()
         doc_id = await asyncio.to_thread(client.index, pdf_path)
         doc_info = client.documents.get(doc_id, {})
+
+        # Copy PDF to a doc_id-keyed filename so it can be served reliably later.
+        import shutil as _shutil
+        doc_pdf_path = PAGEINDEX_PAPERS_DIR / f"{doc_id}.pdf"
+        _shutil.copy2(pdf_path, str(doc_pdf_path))
+
         _index_jobs[job_id] = {
             "status": "done",
             "result": {
                 "doc_id": doc_id,
                 "filename": doc_info.get("doc_name", Path(pdf_path).name),
+                "doc_name": doc_info.get("doc_name", Path(pdf_path).name),
                 "page_count": doc_info.get("page_count"),
             },
         }
@@ -844,6 +851,16 @@ async def chat_get_document(doc_id: str):
         "type": info.get("type"),
         "structure": info.get("structure"),
     }
+
+
+@app.get("/chat/pdf/{doc_id}", tags=["Chat"])
+async def serve_chat_pdf(doc_id: str):
+    """Serve the original PDF for an indexed chat document."""
+    from fastapi.responses import FileResponse as _FileResponse
+    pdf_path = PAGEINDEX_PAPERS_DIR / f"{doc_id}.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF not found for this document")
+    return _FileResponse(str(pdf_path), media_type="application/pdf", filename=f"{doc_id}.pdf")
 
 
 @app.delete("/chat/document/{doc_id}", tags=["Chat"])

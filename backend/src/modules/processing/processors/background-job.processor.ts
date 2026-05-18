@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { Processor, Process, OnQueueFailed } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -9,7 +7,6 @@ import { PipelineJob } from '../../../entities/pipeline-job.entity';
 import { IndexedDocument } from '../../../entities/indexed-document.entity';
 import { JobPayload, JobResult, QUEUE_NAMES, JOB_TYPES } from '../../../types';
 import { FastApiService } from '../../fastapi/fastapi.service';
-import { getChatPdfsDir } from '../../chat/chat.service';
 
 // Allow up to WORKER_CONCURRENCY jobs to run simultaneously in this process.
 // Keep this in sync with MAX_CONCURRENT_DOCS in the FastAPI service.
@@ -128,16 +125,6 @@ export class BackgroundJobProcessor {
         fileName: result.doc_name ?? fileName,
         pageCount: result.page_count ?? null,
       });
-
-      // Rename the temporary PDF ({jobId}.pdf) to its permanent name ({docId}.pdf)
-      try {
-        const dir = getChatPdfsDir();
-        const src = path.join(dir, `${jobId}.pdf`);
-        const dst = path.join(dir, `${result.doc_id}.pdf`);
-        if (fs.existsSync(src)) fs.renameSync(src, dst);
-      } catch (fsErr) {
-        this.logger.warn(`Could not rename chat PDF for docId ${result.doc_id}: ${fsErr}`);
-      }
 
       await this.jobRepo.update(jobId, {
         status: 'completed',

@@ -171,6 +171,19 @@ export class FastApiService {
     }
   }
 
+  async fetchChatPdf(docId: string): Promise<{ buffer: Buffer; filename: string }> {
+    try {
+      const { data } = await this.http.get(`/chat/pdf/${docId}`, {
+        responseType: 'arraybuffer',
+        timeout: this.getTimeout('FASTAPI_PDF_TIMEOUT_MS', 30_000),
+      });
+      return { buffer: Buffer.from(data as ArrayBuffer), filename: `${docId}.pdf` };
+    } catch (error) {
+      this.logger.error(`FastAPI fetchChatPdf failed for ${docId}:`, error);
+      throw new InternalServerErrorException('PDF not available from AI service');
+    }
+  }
+
   async fetchPdf(storedPath: string): Promise<{ buffer: Buffer; filename: string }> {
     try {
       const { data } = await this.http.get('/papers/serve', {
