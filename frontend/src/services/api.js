@@ -186,6 +186,11 @@ export async function deleteChatDocument(docId) {
   await api.delete(`/api/v1/chat/documents/${docId}`);
 }
 
+export async function getChatDocPdf(docId) {
+  const res = await api.get(`/api/v1/chat/documents/${docId}/pdf`, { responseType: 'blob' });
+  return URL.createObjectURL(res.data);
+}
+
 /**
  * Stream a chat query via NestJS → FastAPI SSE proxy.
  * Calls callbacks as SSE events arrive.

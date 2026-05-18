@@ -83,6 +83,24 @@ export class ChatController {
     return { success: true, data: docs };
   }
 
+  @Get('documents/:docId/pdf')
+  @ApiOperation({ summary: 'Serve the original PDF for an indexed document' })
+  @ApiParam({ name: 'docId', description: 'PageIndex document ID' })
+  @ApiResponse({ status: 200, description: 'Returns the PDF file inline' })
+  @ApiResponse({ status: 404, description: 'PDF not available' })
+  async getDocumentPdf(
+    @Param('docId') docId: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.chatService.getPdfPath(docId, user.userId);
+    const fs = await import('fs');
+    const path = await import('path');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(path.basename(filePath))}"`);
+    fs.createReadStream(filePath).pipe(res);
+  }
+
   @Delete('documents/:docId')
   @ApiOperation({ summary: 'Remove an indexed document' })
   @ApiParam({ name: 'docId', description: 'PageIndex document ID' })

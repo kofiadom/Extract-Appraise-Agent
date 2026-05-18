@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { FileText, X } from 'lucide-react';
 import ChatWithDoc from '../components/ChatWithDoc.jsx';
+import { getChatDocPdf } from '../services/api.js';
 
 // Module-level cache survives component unmount/remount within the same browser session.
 const pdfCache = new Map(); // docId → { url, fileName }
@@ -35,12 +36,21 @@ export default function ChatPage({ sidebarOpen }) {
   }, []);
 
   // Called when the user picks an existing doc from the dropdown
-  const handleDocSelected = useCallback((doc) => {
+  const handleDocSelected = useCallback(async (doc) => {
     const cached = pdfCache.get(doc.doc_id);
     if (cached) {
       setPdfUrl(cached.url);
       setShowPdf(true);
-    } else {
+      return;
+    }
+    // Not in session cache — try to fetch from backend (persisted across sessions)
+    try {
+      const url = await getChatDocPdf(doc.doc_id);
+      pdfCache.set(doc.doc_id, { url, fileName: doc.doc_name });
+      setPdfUrl(url);
+      setShowPdf(true);
+    } catch {
+      // PDF not available for this doc (indexed before PDF persistence was added)
       setPdfUrl(null);
       setPdfFile(null);
       setShowPdf(false);
