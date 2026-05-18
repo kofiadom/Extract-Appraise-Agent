@@ -600,17 +600,25 @@ async def _run_byot_bg(job_id: str, extraction_md: str, appraisal_md: str) -> No
         response = await agent.arun(message, stream=False)
         result = _serialize_run(response)
 
-        # Extract the JSON content from the agent response
-        content = result.get("content", "")
-        stripped = re.sub(r"```(?:json)?\s*|```", "", content).strip()
-        try:
-            parsed = json.loads(stripped)
-        except Exception:
-            parsed = None
+        # Extract the JSON content from the agent response.
+        # Use _json_candidates_from_result so we search top-level content AND
+        # any nested member_responses (tool-using agents often place the final
+        # text there rather than at the root).
+        parsed = None
+        for candidate in _json_candidates_from_result(result):
+            try:
+                data = candidate if isinstance(candidate, (dict, list)) else json.loads(str(candidate).strip())
+            except Exception:
+                continue
+            if isinstance(data, dict) and ("extraction" in data or "appraisal" in data):
+                parsed = data
+                break
 
-        if parsed and ("extraction" in parsed or "appraisal" in parsed):
+        if parsed:
             _byot_jobs[job_id] = {"status": "done", "result": parsed}
         else:
+            raw_content = result.get("content", "") or ""
+            logger.error("BYOT job %s: unparseable output (first 500 chars): %s", job_id, raw_content[:500])
             _byot_jobs[job_id] = {"status": "error", "error": "Agent returned unparseable output"}
     except Exception as exc:
         logger.error("BYOT job %s failed: %s", job_id, exc)
