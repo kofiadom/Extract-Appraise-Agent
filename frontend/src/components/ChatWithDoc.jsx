@@ -71,7 +71,7 @@ function MessageBubble({ msg }) {
   );
 }
 
-export default function ChatWithDoc({ onFileSelected, pdfUrl, showPdf, onTogglePdf }) {
+export default function ChatWithDoc({ onFileIndexed, onDocSelected, pdfUrl, showPdf, onTogglePdf }) {
   const [documents, setDocuments] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [docDropdownOpen, setDocDropdownOpen] = useState(false);
@@ -105,9 +105,6 @@ export default function ChatWithDoc({ onFileSelected, pdfUrl, showPdf, onToggleP
     if (!file) return;
     e.target.value = '';
 
-    // Pass the File to the parent (ChatPage) so it can show the PDF in the split panel
-    onFileSelected?.(file);
-
     setIndexing(true);
     setIndexError('');
     try {
@@ -130,6 +127,9 @@ export default function ChatWithDoc({ onFileSelected, pdfUrl, showPdf, onToggleP
           }
         }, 6000);
       });
+
+      // Cache the PDF keyed by docId so it can be restored on re-selection
+      onFileIndexed?.(file, result.doc_id);
 
       await loadDocuments();
       sessionIdRef.current = crypto.randomUUID();
@@ -155,8 +155,8 @@ export default function ChatWithDoc({ onFileSelected, pdfUrl, showPdf, onToggleP
     sessionIdRef.current = crypto.randomUUID();
     setSelectedDoc(doc);
     setDocDropdownOpen(false);
-    // Clear the PDF panel when switching to a previously indexed doc (no File available)
-    onFileSelected?.(null);
+    // Let ChatPage decide whether a cached PDF is available for this doc
+    onDocSelected?.(doc);
     setMessages([{
       id: Date.now(),
       role: 'assistant',

@@ -2,6 +2,15 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { FileText, X } from 'lucide-react';
 import ChatWithDoc from '../components/ChatWithDoc.jsx';
 
+// Module-level cache survives component unmount/remount within the same browser session.
+const pdfCache = new Map(); // docId → { url, fileName }
+function cachePdf(docId, file) {
+  if (pdfCache.has(docId)) URL.revokeObjectURL(pdfCache.get(docId).url);
+  const url = URL.createObjectURL(file);
+  pdfCache.set(docId, { url, fileName: file.name });
+  return url;
+}
+
 
 export default function ChatPage({ sidebarOpen }) {
   const [pdfFile, setPdfFile]         = useState(null);   // File object from just-indexed upload
@@ -9,39 +18,33 @@ export default function ChatPage({ sidebarOpen }) {
   const [showPdf, setShowPdf]         = useState(false);
   const [pdfWidthPct, setPdfWidthPct] = useState(40);
 
-  const pdfUrlRef  = useRef(null);
   const mainRef    = useRef(null);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartPct = useRef(40);
 
-  // Create/revoke blob URL whenever the file changes
-  useEffect(() => {
-    if (pdfUrlRef.current) {
-      URL.revokeObjectURL(pdfUrlRef.current);
-      pdfUrlRef.current = null;
-    }
-    if (!pdfFile) {
-      setPdfUrl(null);
-      setShowPdf(false);
-      return;
-    }
-    const url = URL.createObjectURL(pdfFile);
-    pdfUrlRef.current = url;
+  // No per-render URL management needed — cache handles creation; cleanup on page unload only.
+
+  // Called after a new file is successfully indexed — cache + show PDF
+  const handleFileIndexed = useCallback((file, docId) => {
+    if (!file || !docId) return;
+    const url = cachePdf(docId, file);
+    setPdfFile(file);
     setPdfUrl(url);
     setShowPdf(true);
-  }, [pdfFile]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current);
-    };
   }, []);
 
-  // Called by ChatWithDoc when a PDF is selected for indexing
-  const handleFileSelected = useCallback((file) => {
-    setPdfFile(file ?? null);
+  // Called when the user picks an existing doc from the dropdown
+  const handleDocSelected = useCallback((doc) => {
+    const cached = pdfCache.get(doc.doc_id);
+    if (cached) {
+      setPdfUrl(cached.url);
+      setShowPdf(true);
+    } else {
+      setPdfUrl(null);
+      setPdfFile(null);
+      setShowPdf(false);
+    }
   }, []);
 
   // Resizable divider
@@ -93,7 +96,8 @@ export default function ChatPage({ sidebarOpen }) {
             </p>
           </div>
           <ChatWithDoc
-            onFileSelected={handleFileSelected}
+            onFileIndexed={handleFileIndexed}
+            onDocSelected={handleDocSelected}
             pdfUrl={pdfUrl}
             showPdf={showPdf}
             onTogglePdf={() => setShowPdf((v) => !v)}
