@@ -2,44 +2,38 @@ import React from 'react';
 import { Check } from 'lucide-react';
 
 const STEPS = [
-  { id: 1, label: 'Upload' },
-  { id: 2, label: 'Process' },
-  { id: 3, label: 'Results' },
+  { id: 1, label: 'Template' },
+  { id: 2, label: 'Upload' },
+  { id: 3, label: 'Process' },
+  { id: 4, label: 'Results' },
 ];
 
-function phaseToStep(phase) {
+function phaseToStep(phase, workflowStep) {
+  if (workflowStep === 'template') return 1;
   switch (phase) {
     case 'idle':
     case 'uploading':
     case 'uploaded':
-      return 1;
-    case 'running':
       return 2;
+    case 'running':
+      return 3;
     case 'done':
+      return 4;
     case 'error':
       return 3;
     default:
-      return 1;
+      return 2;
   }
 }
 
-function isCompleted(stepId, phase) {
-  if (phase === 'done') return stepId <= 3;
-  if (phase === 'running') return stepId === 1;
-  if (phase === 'uploaded') return false;
-  if (phase === 'error') return stepId === 1;
-  return false;
-}
-
-export default function StepIndicator({ phase }) {
-  const activeStep = phaseToStep(phase);
+export default function StepIndicator({ phase, workflowStep }) {
+  const activeStep = phaseToStep(phase, workflowStep);
 
   return (
     <div className="flex items-center gap-0 mb-8">
       {STEPS.map((step, index) => {
-        const completed = isCompleted(step.id, phase);
-        const active = step.id === activeStep && !completed;
-        const upcoming = step.id > activeStep && !completed;
+        const completed = step.id < activeStep;
+        const active = step.id === activeStep;
 
         return (
           <React.Fragment key={step.id}>
@@ -75,9 +69,7 @@ export default function StepIndicator({ phase }) {
                 <div className="absolute inset-0 bg-gray-200" />
                 <div
                   className="absolute inset-y-0 left-0 bg-green-500 transition-all duration-500"
-                  style={{
-                    width: completed && step.id < activeStep ? '100%' : isCompleted(step.id, phase) ? '100%' : '0%',
-                  }}
+                  style={{ width: step.id < activeStep ? '100%' : '0%' }}
                 />
               </div>
             )}

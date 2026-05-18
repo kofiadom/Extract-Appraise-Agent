@@ -313,6 +313,15 @@ export async function deleteTemplate(id) {
   await api.delete(`/api/v1/templates/${id}`);
 }
 
+export async function updateTemplate(id, name, extractionTemplate, appraisalTemplate) {
+  const { data } = await api.patch(`/api/v1/templates/${id}`, {
+    name,
+    extractionTemplate,
+    appraisalTemplate,
+  });
+  return data.data;
+}
+
 // ── Job history ───────────────────────────────────────────────────────────────
 
 export async function listJobs({ limit = 20, offset = 0, status } = {}) {

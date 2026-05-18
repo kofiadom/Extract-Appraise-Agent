@@ -36,6 +36,15 @@ export class TemplatesService {
     return tpl;
   }
 
+  async update(id: string, userId: string, dto: Partial<SaveTemplateDto>): Promise<UserTemplate> {
+    const tpl = await this.findOne(id, userId);
+    if (dto.name !== undefined) tpl.name = dto.name;
+    if (dto.extractionTemplate !== undefined) tpl.extractionTemplate = dto.extractionTemplate;
+    if (dto.appraisalTemplate !== undefined) tpl.appraisalTemplate = dto.appraisalTemplate;
+    if (dto.sourceFiles !== undefined) tpl.sourceFiles = dto.sourceFiles;
+    return this.repo.save(tpl);
+  }
+
   async remove(id: string, userId: string): Promise<void> {
     const tpl = await this.findOne(id, userId);
     await this.repo.remove(tpl);

@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Delete,
   Param,
   Body,
@@ -135,6 +136,15 @@ export class TemplatesController {
   async getOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     const tpl = await this.templatesService.findOne(id, user.userId);
     return { success: true, data: tpl };
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a saved template' })
+  @ApiParam({ name: 'id' })
+  @ApiResponse({ status: 200, description: 'Template updated' })
+  async update(@Param('id') id: string, @Body() dto: SaveTemplateDto, @CurrentUser() user: AuthUser) {
+    const updated = await this.templatesService.update(id, user.userId, dto);
+    return { success: true, data: updated };
   }
 
   @Delete(':id')
