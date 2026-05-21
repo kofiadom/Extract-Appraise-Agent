@@ -254,12 +254,12 @@ export default function ResultsPage({ sidebarOpen }) {
             </div>
           </div>
 
-          <MetricsBar
+          {/* <MetricsBar
             metrics={metrics}
             papersCount={papers.length}
             appraised={appraisals.length}
             elapsedMs={elapsedMs}
-          />
+          /> */}
 
           {/* Tab bar + PDF toggle */}
           <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
