@@ -366,7 +366,7 @@ export default function ChatWithDoc({ onFileIndexed, onDocSelected, pdfUrl, show
           </div>
           <p className="text-gray-700 font-medium mb-1">No document selected</p>
           <p className="text-gray-400 text-sm max-w-xs">
-            Upload a PDF to index it with PageIndex, or select an already-indexed document above.
+            Upload a PDF or select an already-uploaded document above.
           </p>
           <button onClick={() => fileInputRef.current?.click()} className="btn-primary mt-5">
             <UploadCloud size={15} /> Upload & Index PDF
