@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, ChevronDown, ChevronUp, Pencil, RotateCcw } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, Pencil, RotateCcw, PenLine } from 'lucide-react';
 import TemplateUploadSection from './TemplateUploadSection.jsx';
 import { DEFAULT_EXTRACTION_FIELDS, DEFAULT_APPRAISAL_CRITERIA } from '../constants/defaultTemplate.js';
 
@@ -34,6 +34,7 @@ export default function TemplateSelectorStep({
   onError,
   onLoadSaved,
   onEditTemplate,
+  onCreateManual,
   onContinue,
 }) {
   return (
@@ -141,6 +142,20 @@ export default function TemplateSelectorStep({
                 </button>
               </div>
               <TemplateUploadSection onParsed={onParsed} onError={onError} />
+              {/* Divider */}
+              <div className="relative flex items-center">
+                <div className="flex-grow border-t border-gray-100" />
+                <span className="px-2 text-[11px] text-gray-300 flex-shrink-0">or</span>
+                <div className="flex-grow border-t border-gray-100" />
+              </div>
+              {/* Manual entry */}
+              <button
+                onClick={onCreateManual}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-gray-200 text-xs font-medium text-gray-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              >
+                <PenLine size={13} />
+                Enter fields manually
+              </button>
             </div>
           )}
         </div>

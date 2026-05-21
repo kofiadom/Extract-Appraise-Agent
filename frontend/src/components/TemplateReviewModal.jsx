@@ -1,96 +1,185 @@
 import { useState } from 'react';
-import { X, ChevronDown, ChevronUp, Save, Loader2, Plus, Trash2 } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Save, Loader2, Plus, Trash2, Pencil, Check } from 'lucide-react';
 import { saveTemplate, updateTemplate } from '../services/api.js';
 
-function EditableFieldCard({ item, index, onChange, onRemove }) {
+// ── Read/edit field card ──────────────────────────────────────────────────────
+
+function FieldCard({ item, index, isEditing, onEdit, onDone, onChange, onRemove }) {
+  if (isEditing) {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50/30 px-4 py-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="w-5 h-5 rounded-full bg-[#1B2A4A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+            {index + 1}
+          </span>
+          <input
+            autoFocus
+            value={item.name || ''}
+            onChange={(e) => onChange({ ...item, name: e.target.value })}
+            className="flex-1 text-sm font-semibold text-gray-800 bg-transparent border-b border-blue-300 focus:outline-none py-0.5"
+            placeholder="Field name"
+          />
+          <button onClick={onDone} title="Done" className="p-1 text-blue-500 hover:text-blue-700 rounded transition-colors">
+            <Check size={13} />
+          </button>
+          <button onClick={onRemove} title="Remove" className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors">
+            <Trash2 size={12} />
+          </button>
+        </div>
+        <textarea
+          value={item.description || ''}
+          onChange={(e) => onChange({ ...item, description: e.target.value })}
+          rows={2}
+          className="w-full text-xs text-gray-600 border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-300 resize-none placeholder-gray-300"
+          placeholder="Description"
+        />
+        <textarea
+          value={item.instructions || ''}
+          onChange={(e) => onChange({ ...item, instructions: e.target.value })}
+          rows={2}
+          className="w-full text-xs text-gray-500 border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-300 resize-none placeholder-gray-300"
+          placeholder="Extraction instructions (rules)"
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 space-y-2">
+    <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 space-y-1.5 group">
       <div className="flex items-center gap-2">
         <span className="w-5 h-5 rounded-full bg-[#1B2A4A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
           {index + 1}
         </span>
-        <input
-          value={item.name || ''}
-          onChange={(e) => onChange({ ...item, name: e.target.value })}
-          className="flex-1 text-sm font-semibold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none py-0.5"
-          placeholder="Field name"
-        />
-        <button
-          onClick={onRemove}
-          className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors"
-        >
-          <Trash2 size={12} />
-        </button>
+        <p className="text-sm font-semibold text-gray-800 flex-1">
+          {item.name || <span className="italic text-gray-400">Unnamed field</span>}
+        </p>
+        {item.required === false && (
+          <span className="text-xs text-gray-400">(optional)</span>
+        )}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={onEdit} title="Edit" className="p-1 text-gray-400 hover:text-blue-500 rounded transition-colors">
+            <Pencil size={12} />
+          </button>
+          <button onClick={onRemove} title="Remove" className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors">
+            <Trash2 size={12} />
+          </button>
+        </div>
       </div>
-      <textarea
-        value={item.description || ''}
-        onChange={(e) => onChange({ ...item, description: e.target.value })}
-        rows={2}
-        className="w-full text-xs text-gray-600 border border-gray-100 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100 resize-none placeholder-gray-300"
-        placeholder="Description"
-      />
-      <textarea
-        value={item.instructions || ''}
-        onChange={(e) => onChange({ ...item, instructions: e.target.value })}
-        rows={2}
-        className="w-full text-xs text-gray-500 border border-gray-100 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100 resize-none placeholder-gray-300"
-        placeholder="Extraction instructions (rules)"
-      />
+      {item.description && (
+        <p className="text-xs text-gray-600 leading-relaxed pl-7">{item.description}</p>
+      )}
+      {item.instructions && (
+        <p className="text-xs text-gray-500 italic leading-relaxed pl-7">Rule: {item.instructions}</p>
+      )}
     </div>
   );
 }
 
-function EditableCriterionCard({ item, index, onChange, onRemove }) {
+// ── Read/edit criterion card ──────────────────────────────────────────────────
+
+function CriterionCard({ item, index, isEditing, onEdit, onDone, onChange, onRemove }) {
+  if (isEditing) {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50/30 px-4 py-3 space-y-2">
+        <div className="flex items-start gap-2">
+          <span className="w-5 h-5 rounded-full bg-[#1B2A4A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-1">
+            {index + 1}
+          </span>
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={item.name || ''}
+                onChange={(e) => onChange({ ...item, name: e.target.value })}
+                className="flex-1 text-sm font-semibold text-gray-800 bg-transparent border-b border-blue-300 focus:outline-none py-0.5"
+                placeholder="Criterion name"
+              />
+              <button onClick={onDone} title="Done" className="p-1 text-blue-500 hover:text-blue-700 rounded transition-colors flex-shrink-0">
+                <Check size={13} />
+              </button>
+              <button onClick={onRemove} title="Remove" className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors flex-shrink-0">
+                <Trash2 size={12} />
+              </button>
+            </div>
+            <textarea
+              value={item.description || ''}
+              onChange={(e) => onChange({ ...item, description: e.target.value })}
+              rows={2}
+              className="w-full text-xs text-gray-600 border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-300 resize-none placeholder-gray-300"
+              placeholder="Criterion question / description"
+            />
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-gray-400 flex-shrink-0">Applies to:</span>
+              <input
+                value={(item.applicability ?? []).join(', ')}
+                onChange={(e) => {
+                  const tags = e.target.value
+                    .split(',')
+                    .map((s) => s.trim().toUpperCase())
+                    .filter(Boolean);
+                  onChange({ ...item, applicability: tags });
+                }}
+                className="flex-1 text-xs text-gray-600 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-300"
+                placeholder="ALL, SYNTHESIS, COHORT, QUALITATIVE"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 space-y-2">
+    <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 space-y-1.5 group">
       <div className="flex items-start gap-2">
-        <span className="w-5 h-5 rounded-full bg-[#1B2A4A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-1">
+        <span className="w-5 h-5 rounded-full bg-[#1B2A4A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
           {index + 1}
         </span>
-        <div className="flex-1 min-w-0 space-y-2">
-          <div className="flex items-center gap-2">
-            <input
-              value={item.name || ''}
-              onChange={(e) => onChange({ ...item, name: e.target.value })}
-              className="flex-1 text-sm font-semibold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none py-0.5"
-              placeholder="Criterion name"
-            />
-            <button
-              onClick={onRemove}
-              className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors flex-shrink-0"
-            >
-              <Trash2 size={12} />
-            </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-gray-800">
+              {item.name || <span className="italic text-gray-400">Unnamed criterion</span>}
+            </p>
+            {(item.applicability ?? []).map((tag) => (
+              <span key={tag} className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                {tag}
+              </span>
+            ))}
           </div>
-          <textarea
-            value={item.description || ''}
-            onChange={(e) => onChange({ ...item, description: e.target.value })}
-            rows={2}
-            className="w-full text-xs text-gray-600 border border-gray-100 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100 resize-none placeholder-gray-300"
-            placeholder="Criterion question / description"
-          />
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-gray-400 flex-shrink-0">Applies to:</span>
-            <input
-              value={(item.applicability ?? []).join(', ')}
-              onChange={(e) => {
-                const tags = e.target.value
-                  .split(',')
-                  .map((s) => s.trim().toUpperCase())
-                  .filter(Boolean);
-                onChange({ ...item, applicability: tags });
-              }}
-              className="flex-1 text-xs text-gray-600 border border-gray-100 rounded px-2 py-1 focus:outline-none focus:border-blue-300"
-              placeholder="ALL, SYNTHESIS, COHORT, QUALITATIVE"
-            />
-          </div>
+          {item.description && (
+            <p className="text-xs text-gray-600 leading-relaxed mt-1">{item.description}</p>
+          )}
+          {item.instructions && (
+            <p className="text-xs text-gray-500 italic leading-relaxed mt-0.5">
+              How to rate: {item.instructions}
+            </p>
+          )}
+          {item.rating_scale?.length > 0 && (
+            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              {item.rating_scale.map((r) => (
+                <span key={r} className="px-1.5 py-0.5 rounded text-xs bg-gray-200 text-gray-600">
+                  {r}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          <button onClick={onEdit} title="Edit" className="p-1 text-gray-400 hover:text-blue-500 rounded transition-colors">
+            <Pencil size={12} />
+          </button>
+          <button onClick={onRemove} title="Remove" className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors">
+            <Trash2 size={12} />
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function EditableSection({ title, count, children, onAdd, addLabel }) {
+// ── Collapsible section with add button ───────────────────────────────────────
+
+function Section({ title, count, children, onAdd, addLabel }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -126,6 +215,8 @@ function EditableSection({ title, count, children, onAdd, addLabel }) {
   );
 }
 
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
 export default function TemplateReviewModal({
   parsed,
   sourceFiles,
@@ -143,6 +234,10 @@ export default function TemplateReviewModal({
   const [criteria, setCriteria] = useState(() =>
     JSON.parse(JSON.stringify(parsed?.appraisal?.criteria ?? [])),
   );
+  // Which card is currently in edit mode (-1 = none)
+  const [editingFieldIdx, setEditingFieldIdx] = useState(-1);
+  const [editingCriterionIdx, setEditingCriterionIdx] = useState(-1);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -151,9 +246,12 @@ export default function TemplateReviewModal({
   }
   function removeField(index) {
     setFields((prev) => prev.filter((_, i) => i !== index));
+    if (editingFieldIdx === index) setEditingFieldIdx(-1);
   }
   function addField() {
+    const newIdx = fields.length;
     setFields((prev) => [...prev, { name: '', description: '', instructions: '', required: true }]);
+    setEditingFieldIdx(newIdx);
   }
 
   function updateCriterion(index, value) {
@@ -161,12 +259,15 @@ export default function TemplateReviewModal({
   }
   function removeCriterion(index) {
     setCriteria((prev) => prev.filter((_, i) => i !== index));
+    if (editingCriterionIdx === index) setEditingCriterionIdx(-1);
   }
   function addCriterion() {
+    const newIdx = criteria.length;
     setCriteria((prev) => [
       ...prev,
       { name: '', description: '', applicability: ['ALL'], rating_scale: ['Yes', 'Partial', 'No', 'N/A'], instructions: '' },
     ]);
+    setEditingCriterionIdx(newIdx);
   }
 
   async function handleSave() {
@@ -196,8 +297,8 @@ export default function TemplateReviewModal({
             </p>
             <p className="text-xs text-gray-500 mt-0.5">
               {isEditing
-                ? 'Modify fields and criteria, then save changes'
-                : 'Review and edit before approving'}
+                ? 'Hover a card and click the pencil to edit it'
+                : 'Review fields and criteria — hover any card to edit or remove it'}
             </p>
           </div>
           <button
@@ -210,39 +311,45 @@ export default function TemplateReviewModal({
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
-          <EditableSection
+          <Section
             title="Extraction Fields"
             count={fields.length}
             onAdd={addField}
             addLabel="Add field"
           >
             {fields.map((f, i) => (
-              <EditableFieldCard
+              <FieldCard
                 key={i}
                 item={f}
                 index={i}
+                isEditing={editingFieldIdx === i}
+                onEdit={() => setEditingFieldIdx(i)}
+                onDone={() => setEditingFieldIdx(-1)}
                 onChange={(v) => updateField(i, v)}
                 onRemove={() => removeField(i)}
               />
             ))}
-          </EditableSection>
+          </Section>
 
-          <EditableSection
+          <Section
             title="Appraisal Criteria"
             count={criteria.length}
             onAdd={addCriterion}
             addLabel="Add criterion"
           >
             {criteria.map((c, i) => (
-              <EditableCriterionCard
+              <CriterionCard
                 key={i}
                 item={c}
                 index={i}
+                isEditing={editingCriterionIdx === i}
+                onEdit={() => setEditingCriterionIdx(i)}
+                onDone={() => setEditingCriterionIdx(-1)}
                 onChange={(v) => updateCriterion(i, v)}
                 onRemove={() => removeCriterion(i)}
               />
             ))}
-          </EditableSection>
+          </Section>
         </div>
 
         {/* Footer */}

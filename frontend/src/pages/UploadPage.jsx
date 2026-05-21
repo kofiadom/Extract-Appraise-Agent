@@ -356,6 +356,12 @@ export default function UploadPage({ onPhaseChange, sidebarOpen }) {
                   initialName: tpl.name,
                 })
               }
+              onCreateManual={() =>
+                setReviewModal({
+                  parsed: { extraction: { fields: [] }, appraisal: { criteria: [] } },
+                  sourceFiles: {},
+                })
+              }
               onContinue={() => setWorkflowStep('upload')}
             />
           </>
