@@ -39,7 +39,14 @@ services:
       dockerfile: Dockerfile
     environment:
       AGNO_DB_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@postgres:5432/agno_sessions
-    env_file: .env
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      AGENT_METHOD: ${AGENT_METHOD}
+      HF_TOKEN: ${HF_TOKEN}
+      LLAMAPARSE_API_KEY: ${LLAMAPARSE_API_KEY}
+      PAGEINDEX_INDEX_MODEL: ${PAGEINDEX_INDEX_MODEL}
     volumes:
       - ./tmp:/app/tmp
     depends_on:
@@ -63,13 +70,14 @@ services:
     environment:
       NODE_ENV: production
       REDIS_HOST: redis
+      REDIS_PORT: 6379
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USERNAME: postgres
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: agno_rag
       FASTAPI_URL: http://fastapi:7777
-    env_file: ./backend/.env
+      JWT_SECRET: ${JWT_SECRET}
     volumes:
       - ./tmp:/app/tmp
     depends_on:
