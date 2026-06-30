@@ -56,19 +56,26 @@ export default function AuthScreen({ onLogin }) {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
           {/* Mode tabs */}
           <div className="flex gap-1 p-1 bg-gray-50 rounded-xl mb-6">
-            {['login', 'register'].map((m) => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setError(''); }}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-150 capitalize ${
-                  mode === m
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {m === 'login' ? 'Sign In' : 'Create Account'}
-              </button>
-            ))}
+            {['login', 'register'].map((m) => {
+              const isRegister = m === 'register';
+              return (
+                <button
+                  key={m}
+                  onClick={() => { if (!isRegister) { setMode(m); setError(''); } }}
+                  disabled={isRegister}
+                  title={isRegister ? 'Registration is currently unavailable' : undefined}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-150 capitalize ${
+                    mode === m
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : isRegister
+                        ? 'text-gray-300 cursor-not-allowed'
+                        : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {isRegister ? 'Create Account' : 'Sign In'}
+                </button>
+              );
+            })}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
